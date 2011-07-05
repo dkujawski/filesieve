@@ -52,27 +52,12 @@ class TestSieveStaticFuncs(object):
     def teardown(self):
         return    
     def test_get_hash_key(self):
-        expected = "f6325473c8d80f37cf5711c1e97e92f0"
-        data = os.path.join(self.data_dir, 'small_orig.log')
+        expected = "e4578cd35d06171139bad5b66adca0fc"
+        fp = os.path.join(self.data_dir, 'small_orig.log')
+        with open(fp) as fh:
+            data = fh.read()
         found = sieve.get_hash_key(data)
         assert_equal(expected, found)
         return
     
-if __name__ == '__main__':
-    print 'testing....\n'
     
-    ts = TestSieve()
-    ts.setup()
-    ts.test_walk()
-    ts.teardown()
-    
-    ts.setup()
-    ts.test_clean_dup()
-    ts.teardown()
-
-    tssf = TestSieveStaticFuncs()
-    tssf.setup()
-    tssf.test_get_hash_key()
-    tssf.teardown()
-    
-    print '\ndone!'
