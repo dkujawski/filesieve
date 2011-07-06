@@ -2,5 +2,6 @@
 
 THIS_DIR=`dirname $0`
 FILESIEVE_ROOT=`dirname $THIS_DIR`
-
+PYTHONPATH=$FILESIEVE_ROOT/src:$PYTHONPATH
+export PYTHONPATH
 exec $FILESIEVE_ROOT/src/filesieve/cmd.py "$@"
