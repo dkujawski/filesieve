@@ -3,13 +3,14 @@ Created on 29/06/2011
 
 @author: dave
 '''
+from collections import defaultdict
 import ConfigParser
 import hashlib
 import os
 import shutil
 
 class Sieve(object):
-    """Container object to init global config data and identify dup files.
+    """ Container object to init global config data and identify dup files.
     The main sieve.conf file can be in one of two places.  First the env is
     checked for the FILESIEVE_ROOT var.  If this is not found it is assumed
     that the config file is in the config dir three dirs up from this module. 
@@ -39,15 +40,25 @@ class Sieve(object):
         # set defaults from config
         self.read_size = int(config.get('global', 'read_size', '1024'))
         self.dup_dir = config.get('global', 'dup_dir', '/tmp/sieve/dups')
+        # dup trackers
+        self.dup_keys = set()
 
+    @property
+    def dup_count(self):
+        """ return number of dups found since object init
+        """
+        return len(self.dup_keys)
+    
     def walk(self, base_dir):
-        '''
-        recursively walk base_dir collecting md5 data from each file
+        """ recursively walk base_dir collecting md5 data from each file
         add data to a dict, when found dup md5 hashes move the matching file to
         the dup_dir as set in the config/sieve.conf
-        '''
-        bucket = dict()
-        dup_count = 0
+        """
+        assert isinstance(base_dir, str), 'base_dir must be a string type'
+        bucket = defaultdict(list)
+        if not os.path.exists(base_dir):
+            print "base directory tree does not exist:\n\t%s" % (base_dir,)
+            return dict(bucket)
         # walk the base_dir, we don't care about directory names.
         for root, _, files in os.walk(base_dir):
             for fn in files:
@@ -76,14 +87,12 @@ class Sieve(object):
                 key = get_hash_key(chunk)
                 # check to see if we have seen this hash before
                 if key in bucket:
-                    """ if we have seen this key before this file is a dup
-                    move it out of the way into the dup_dir. 
+                    """ if we have seen this key before this file is a dup.
+                    add the key to the dup set
                     """
-                    clean_dup(fp, self.dup_dir)
-                    dup_count += 1
-                else:
-                    bucket[key] = fp
-        return bucket, dup_count
+                    self.dup_keys.add(key)
+                bucket[key].append(fp)
+        return dict(bucket)
 
 def get_hash_key(data):
     """ generate a hash key using data
