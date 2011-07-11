@@ -45,8 +45,7 @@ def build_parser():
     parser.add_argument('-a', '--alternate', type=is_createable_dir,
                         help='move all duplicate files into this directory')
     parser.add_argument('base', nargs='+', type=is_valid_dir, 
-                        help='the base directory tree to search')
-    
+                        help='the base directory tree to search')    
     return parser
 
 if __name__ == '__main__':
