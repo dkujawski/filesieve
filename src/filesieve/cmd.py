@@ -44,7 +44,7 @@ def build_parser():
     parser = argparse.ArgumentParser(description=DESC)
     parser.add_argument('-a', '--alternate', type=is_createable_dir,
                         help='move all duplicate files into this directory')
-    parser.add_argument('base', nargs='?', default='.', type=is_valid_dir, 
+    parser.add_argument('base', nargs='+', type=is_valid_dir, 
                         help='the base directory tree to search')
     
     return parser
@@ -58,5 +58,7 @@ if __name__ == '__main__':
     if not args.base:
         bp.print_help()
         sys.exit(1)
-    s.walk(args.base)
+    for path in args.base:
+        tmp_data = s.walk(path)
+        
     
