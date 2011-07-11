@@ -26,7 +26,10 @@ class TestSieve(object):
     def test_walk(self):
         s = sieve.Sieve()
         s.dup_dir = self.dup
-        b,d = s.walk(self.src)
+        b = s.walk(self.src)
+        d = s.dup_count
+        # TODO: fix this test so that it actually checks the diff between the
+        # files. it is not deterministic which file will be moved or found first 
         expected = {
           '787ada88e6c442bb3ec6b30c97b9126c': os.path.join(self.src, 'big_diff.log'), 
           'c86eaa9d51d51dfe1a6a404739f62303': os.path.join(self.src, 'small_diff.log'), 
