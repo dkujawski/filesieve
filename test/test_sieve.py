@@ -28,13 +28,11 @@ class TestSieve(object):
         s.dup_dir = self.dup
         b = s.walk(self.src)
         d = s.dup_count
-        # TODO: fix this test so that it actually checks the diff between the
-        # files. it is not deterministic which file will be moved or found first 
         expected = {
-          '787ada88e6c442bb3ec6b30c97b9126c': os.path.join(self.src, 'big_diff.log'), 
-          'c86eaa9d51d51dfe1a6a404739f62303': os.path.join(self.src, 'small_diff.log'), 
-          '5819b7a15d098be2c28f04e6edfb7515': os.path.join(self.src, 'big_copy.log'), 
-          'ca77696740831b2ac340f71140e641cb': os.path.join(self.src, 'small_copy.log'),
+          '787ada88e6c442bb3ec6b30c97b9126c': [os.path.join(self.src, 'big_diff.log'),], 
+          'c86eaa9d51d51dfe1a6a404739f62303': [os.path.join(self.src, 'small_diff.log'),], 
+          '5819b7a15d098be2c28f04e6edfb7515': [os.path.join(self.src, 'big_copy.log'),os.path.join(self.src, 'big_orig.log')], 
+          'ca77696740831b2ac340f71140e641cb': [os.path.join(self.src, 'small_copy.log'),os.path.join(self.src, 'small_orig.log')],
         }
         assert_equal(b, expected)
         assert_equal(d, 2)
