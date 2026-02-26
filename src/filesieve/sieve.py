@@ -1,70 +1,76 @@
-'''
-Created on 29/06/2011
+"""Core duplicate-file detection primitives for FileSieve."""
 
-@author: dave
-'''
 from collections import defaultdict
-import ConfigParser
 import hashlib
+import logging
 import os
 import shutil
+from configparser import ConfigParser
+from typing import DefaultDict
 
-class Sieve(object):
-    """ Container object to init global config data and identify dup files.
-    The main sieve.conf file can be in one of two places.  First the env is
-    checked for the FILESIEVE_ROOT var.  If this is not found it is assumed
-    that the config file is in the config dir three dirs up from this module. 
-    
+
+DEFAULT_READ_SIZE = 1024
+DEFAULT_DUP_DIR = "/tmp/sieve/dups"
+CONFIG_FILE = "config/sieve.conf"
+
+LOGGER = logging.getLogger(__name__)
+
+
+class Sieve:
+    """Initialize config state and identify duplicate files.
+
+    The main sieve.conf file can be in one of two places. First the
+    FILESIEVE_ROOT environment variable is checked. If this is not found,
+    the config file is assumed to live in the config dir three dirs up from
+    this module.
+
     Example ::
-    
+
         base_dir = "/vol/musix/Music"
         s = Sieve()
         file_dict = s.walk(base_dir)
-                
+
     """
-    def __init__(self):        
+
+    def __init__(self) -> None:
         # set defaults from config
         config = self.__get_config()
-        self.read_size = int(config.get('global', 'read_size', '1024'))
-        self.dup_dir = config.get('global', 'dup_dir', '/tmp/sieve/dups')
+        self.read_size = int(
+            config.get("global", "read_size", fallback=str(DEFAULT_READ_SIZE))
+        )
+        self.dup_dir = config.get("global", "dup_dir", fallback=DEFAULT_DUP_DIR)
         # dup trackers
         self.dup_keys = set()
         # main data bucket
-        self.data = defaultdict(list)
+        self.data: DefaultDict[str, list[str]] = defaultdict(list)
 
-    def __get_config(self):
-        """ dig out the config file
-        """
+    def __get_config(self) -> ConfigParser:
+        """Find and load the config file."""
         # where is the config file?
-        config_file = 'config/sieve.conf'
-        env_path = os.environ.get('FILESIEVE_ROOT')
+        env_path = os.environ.get("FILESIEVE_ROOT")
         if not env_path:
-            # TODO: convert this into proper logging
-            rel_path = os.path.join('../../../')
+            rel_path = os.path.join("../../../")
             cur_path = os.path.abspath(__file__)
             env_path = os.path.abspath(os.path.join(cur_path, rel_path))
-        # get config settings    
-        config_path = os.path.join(env_path, config_file)
+        # get config settings
+        config_path = os.path.join(env_path, CONFIG_FILE)
         if not os.path.exists(config_path):
-            print "unable to locate config file, using defaults."
-        config = ConfigParser.SafeConfigParser()
+            LOGGER.warning("Unable to locate config file, using defaults.")
+        config = ConfigParser()
         config.read(config_path)
         return config
-    
+
     @property
-    def dup_count(self):
-        """ return number of dups found since object init
-        """
+    def dup_count(self) -> int:
+        """Return number of duplicates found since object init."""
         return len(self.dup_keys)
-    
-    def walk(self, base_dir):
-        """ recursively walk base_dir collecting md5 data from each file
-        add data to a dict, when found dup md5 hashes move the matching file to
-        the dup_dir as set in the config/sieve.conf
-        """
-        assert isinstance(base_dir, str), 'base_dir must be a string type'
+
+    def walk(self, base_dir: str) -> dict[str, list[str]]:
+        """Recursively walk ``base_dir`` collecting file hash metadata."""
+        if not isinstance(base_dir, str):
+            raise TypeError("base_dir must be a string type")
         if not os.path.exists(base_dir):
-            print "base directory tree does not exist:\n\t%s" % (base_dir,)
+            LOGGER.error("Base directory tree does not exist: %s", base_dir)
             return dict(self.data)
         # walk the base_dir, we don't care about directory names.
         for root, _, files in os.walk(base_dir):
@@ -83,48 +89,40 @@ class Sieve(object):
                 self.data[key].append(fp)
         return dict(self.data)
 
-def process_file(file_path, read_size):
-    """ generate a hash key based on the file_path.  if the file is larger than
-    twice the read_size base the key on the first and last data chunks of the 
-    file.  otherwise use the entire file data.
-    """
-    double_read_size = (2 * read_size)
+
+def process_file(file_path: str, read_size: int) -> str:
+    """Generate a hash key from file contents."""
+    double_read_size = 2 * read_size
     if os.stat(file_path).st_size > double_read_size:
-        """ for files that are larger than twice the read_size only
-        read the first and last chunks of the file.  this avoids
-        having to load the entire file into memory.
-        """
-        first = ''
-        last = ''                
-        with open(file_path) as fh:
+        # For large files, read just the first and last chunks.
+        with open(file_path, "rb") as fh:
             first = fh.read(read_size)
-            neg_read_size = (-1 * read_size)
+            neg_read_size = -1 * read_size
             fh.seek(neg_read_size, os.SEEK_END)
             last = fh.read(read_size)
         chunk = first + last
     else:
-        """ for files that are smaller than twice the read_size go 
-        ahead and generate the hash based on the entire file.
-        """
-        with open(file_path) as fh:
+        # For small files, hash everything.
+        with open(file_path, "rb") as fh:
             chunk = fh.read()
     # build a hash key based on the file data
     return get_hash_key(chunk)
 
-def get_hash_key(data):
-    """ generate a hash key using data
-    """
+
+def get_hash_key(data: bytes) -> str:
+    """Generate an MD5 key from byte data."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("data must be bytes")
     md5 = hashlib.md5()
     md5.update(data)
     key = md5.hexdigest()
     return key
 
-def clean_dup(dup_file, dup_dir):
-    """ move the dup_file over to a mirrored directory rooted in dup_dir 
-    """
-    dest = os.path.join(dup_dir, dup_file.lstrip('/'))
+
+def clean_dup(dup_file: str, dup_dir: str) -> None:
+    """Move ``dup_file`` into a mirrored directory rooted in ``dup_dir``."""
+    dest = os.path.join(dup_dir, dup_file.lstrip("/"))
     dest_dir = os.path.dirname(dest)
     if not os.path.exists(dest_dir):
         os.makedirs(dest_dir)
     shutil.move(dup_file, dest)
-    return
