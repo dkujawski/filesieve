@@ -3,3 +3,10 @@ author: dave kujawski
 this started as a little tool for me to get rid of duplicate media files it a collection of merged media libraries.  
 i needed a way to get identify duplicate files that had different names and move them into a separate location.
 
+## running tests
+
+run the test suite with:
+
+```bash
+uv run pytest
+```
