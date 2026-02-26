@@ -1,63 +1,74 @@
 #!/usr/bin/env python
-'''
-Created on 5/07/2011
+"""CLI entrypoint for recursively finding duplicate files."""
 
-@author: dave
-'''
 import argparse
+import logging
 import os
 import sys
 
 from filesieve import sieve
 
-DESC = """Recursively walk the base directory moving out any
+DESCRIPTION = """Recursively walk the base directory moving out any
 duplicate files into an alternate directory leaving only unique
 files remaining in the base directory tree.
 """
 
-def is_valid_dir(path_str):
-    """ check to see if the path_str exists on the file system and is a
-    directory, if not raise an error.
-    """
+LOGGER = logging.getLogger(__name__)
+
+
+def is_valid_dir(path_str: str) -> str:
+    """Validate that ``path_str`` exists and is a directory."""
     resolved_path = os.path.abspath(path_str)
     if os.path.exists(resolved_path) and os.path.isdir(resolved_path):
         return resolved_path
-    msg = "path is not a directory or does not exist:\n\t%s" % resolved_path
+    msg = f"path is not a directory or does not exist:\n\t{resolved_path}"
     raise argparse.ArgumentTypeError(msg)
 
-def is_createable_dir(path_str):
-    """ if the path_str already exists and is a directory, return full path.
-    if the path_str does not exist, try to create it. if successful, return full
-    path.  if the directory cannot be created, raise an error.
-    """
+
+def is_createable_dir(path_str: str) -> str:
+    """Validate ``path_str`` as an existing directory or create it."""
     resolved_path = os.path.abspath(path_str)
     if not (os.path.exists(resolved_path) and os.path.isdir(resolved_path)):
         try:
             os.mkdir(resolved_path)
-        except Exception as e:
-            msg = "unable to create alternate directory for duplicate files:" \
-                + "\n\t%s\n%s" % (resolved_path, str(e))
+        except OSError as e:
+            msg = (
+                "unable to create alternate directory for duplicate files:"
+                f"\n\t{resolved_path}\n{str(e)}"
+            )
             raise argparse.ArgumentTypeError(msg)
     return resolved_path
 
-def build_parser():
-    parser = argparse.ArgumentParser(description=DESC)
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build and return the command line parser."""
+    parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument('-a', '--alternate', type=is_createable_dir,
                         help='move all duplicate files into this directory')
-    parser.add_argument('base', nargs='+', type=is_valid_dir, 
-                        help='the base directory tree to search')    
+    parser.add_argument('base', nargs='+', type=is_valid_dir,
+                        help='the base directory tree to search')
     return parser
 
-if __name__ == '__main__':
-    bp = build_parser()
-    args = bp.parse_args()
+
+def main() -> int:
+    """Execute the CLI workflow."""
+    logging.basicConfig(level=logging.INFO)
+    parser = build_parser()
+    args = parser.parse_args()
+
     s = sieve.Sieve()
     if args.alternate:
         s.dup_dir = args.alternate
+
     if not args.base:
-        bp.print_help()
-        sys.exit(1)
+        parser.error("at least one base directory must be provided")
+
     for path in args.base:
-        tmp_data = s.walk(path)
-        
+        LOGGER.info("Processing base path: %s", path)
+        s.walk(path)
+
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())
     
