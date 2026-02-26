@@ -1,5 +1,6 @@
 #!/bin/bash
-THIS_DIR=`dirname $0`
-PYTHONPATH=$THIS_DIR/src
-TEST_DIR=$THIS_DIR/test
-nosetests -v $TEST_DIR
+set -euo pipefail
+
+THIS_DIR="$(dirname "$0")"
+cd "$THIS_DIR"
+uv run pytest
