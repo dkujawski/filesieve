@@ -21,31 +21,31 @@ def sieve_tree(tmp_path, test_data_dir):
     return src, dup
 
 
-def test_walk(sieve_tree):
+def test_walk_moves_only_later_duplicates(sieve_tree):
     src, dup = sieve_tree
     s = sieve.Sieve()
     s.dup_dir = str(dup)
 
     found = s.walk(str(src))
 
-    expected = {
+    assert found == {
         "787ada88e6c442bb3ec6b30c97b9126c": [str(src / "big_diff.log")],
         "c86eaa9d51d51dfe1a6a404739f62303": [str(src / "small_diff.log")],
-        "5819b7a15d098be2c28f04e6edfb7515": [
-            str(src / "big_copy.log"),
-            str(src / "big_orig.log"),
-        ],
-        "ca77696740831b2ac340f71140e641cb": [
-            str(src / "small_copy.log"),
-            str(src / "small_orig.log"),
-        ],
+        "5819b7a15d098be2c28f04e6edfb7515": [str(src / "big_copy.log")],
+        "ca77696740831b2ac340f71140e641cb": [str(src / "small_copy.log")],
     }
-
-    normalized_found = {key: sorted(paths) for key, paths in found.items()}
-    normalized_expected = {key: sorted(paths) for key, paths in expected.items()}
-
-    assert normalized_found == normalized_expected
     assert s.dup_count == 2
+
+    moved_sources = {entry["source"] for entry in s.results["duplicates_moved"]}
+    assert moved_sources == {str(src / "big_orig.log"), str(src / "small_orig.log")}
+
+    assert (src / "big_copy.log").exists()
+    assert (src / "small_copy.log").exists()
+    assert not (src / "big_orig.log").exists()
+    assert not (src / "small_orig.log").exists()
+
+    assert (dup / str(src / "big_orig.log").lstrip("/")).exists()
+    assert (dup / str(src / "small_orig.log").lstrip("/")).exists()
 
 
 def test_clean_dup_moves_file_into_mirrored_path(sieve_tree):
@@ -100,3 +100,29 @@ def test_get_hash_key_is_binary_safe():
 def test_get_hash_key_rejects_non_binary_input():
     with pytest.raises(TypeError):
         sieve.get_hash_key("not-bytes")
+
+
+def test_walk_logs_and_continues_on_move_failure(sieve_tree, monkeypatch, caplog):
+    src, dup = sieve_tree
+    s = sieve.Sieve()
+    s.dup_dir = str(dup)
+
+    original_clean_dup = sieve.clean_dup
+
+    def fail_clean_dup(path, dup_dir):
+        if path.endswith("small_orig.log"):
+            raise OSError("boom")
+        return original_clean_dup(path, dup_dir)
+
+    monkeypatch.setattr(sieve, "clean_dup", fail_clean_dup)
+
+    with caplog.at_level("ERROR"):
+        found = s.walk(str(src))
+
+    assert found["ca77696740831b2ac340f71140e641cb"] == [str(src / "small_copy.log")]
+    assert (src / "small_orig.log").exists()
+    assert any("Unable to move duplicate file" in rec.message for rec in caplog.records)
+
+    moved_sources = {entry["source"] for entry in s.results["duplicates_moved"]}
+    assert str(src / "big_orig.log") in moved_sources
+    assert str(src / "small_orig.log") not in moved_sources

@@ -41,6 +41,7 @@ class Sieve:
         self.dup_dir = config.get("global", "dup_dir", fallback=DEFAULT_DUP_DIR)
         # dup trackers
         self.dup_keys = set()
+        self.results: dict[str, list[dict[str, str]]] = {"duplicates_moved": []}
         # main data bucket
         self.data: DefaultDict[str, list[str]] = defaultdict(list)
 
@@ -66,7 +67,12 @@ class Sieve:
         return len(self.dup_keys)
 
     def walk(self, base_dir: str) -> dict[str, list[str]]:
-        """Recursively walk ``base_dir`` collecting file hash metadata."""
+        """Recursively walk ``base_dir`` collecting file hash metadata.
+
+        The first-seen file for a given content hash is kept in place. Any
+        later file with the same hash is treated as a duplicate and moved into
+        ``dup_dir``.
+        """
         if not isinstance(base_dir, str):
             raise TypeError("base_dir must be a string type")
         if not os.path.exists(base_dir):
@@ -81,10 +87,16 @@ class Sieve:
                 key = process_file(fp, self.read_size)
                 # check to see if we have seen this hash before
                 if key in self.data:
-                    """ if we have seen this key before this file is a dup.
-                    add the key to the dup set
-                    """
                     self.dup_keys.add(key)
+                    try:
+                        destination = clean_dup(fp, self.dup_dir)
+                    except OSError:
+                        LOGGER.exception("Unable to move duplicate file: %s", fp)
+                    else:
+                        self.results["duplicates_moved"].append(
+                            {"source": fp, "destination": destination}
+                        )
+                    continue
                 # add the key and the data dict
                 self.data[key].append(fp)
         return dict(self.data)
@@ -119,10 +131,11 @@ def get_hash_key(data: bytes) -> str:
     return key
 
 
-def clean_dup(dup_file: str, dup_dir: str) -> None:
+def clean_dup(dup_file: str, dup_dir: str) -> str:
     """Move ``dup_file`` into a mirrored directory rooted in ``dup_dir``."""
     dest = os.path.join(dup_dir, dup_file.lstrip("/"))
     dest_dir = os.path.dirname(dest)
     if not os.path.exists(dest_dir):
         os.makedirs(dest_dir)
     shutil.move(dup_file, dest)
+    return dest
