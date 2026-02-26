@@ -1,7 +1,34 @@
 author: dave kujawski
 
-this started as a little tool for me to get rid of duplicate media files it a collection of merged media libraries.  
-i needed a way to get identify duplicate files that had different names and move them into a separate location.
+this started as a little tool for me to get rid of duplicate media files in a collection of merged media libraries.
+i needed a way to identify duplicate files that had different names and move them into a separate location.
+
+## development workflow with uv
+
+create and activate a virtual environment:
+
+```bash
+uv venv
+source .venv/bin/activate
+```
+
+sync project dependencies from `pyproject.toml`:
+
+```bash
+uv sync
+```
+
+run the CLI entry point:
+
+```bash
+uv run filesieve --help
+```
+
+build source and wheel distributions:
+
+```bash
+uv build
+```
 
 ## running tests
 

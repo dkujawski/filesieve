@@ -1,8 +1,23 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "filesieve"
 version = "0.0.0"
+description = "Find duplicate files by content and move duplicates to an alternate directory"
+readme = "README"
 requires-python = ">=3.10"
 dependencies = []
+
+[project.scripts]
+filesieve = "filesieve.cmd:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
