@@ -126,3 +126,44 @@ def test_walk_logs_and_continues_on_move_failure(sieve_tree, monkeypatch, caplog
     moved_sources = {entry["source"] for entry in s.results["duplicates_moved"]}
     assert str(src / "big_orig.log") in moved_sources
     assert str(src / "small_orig.log") not in moved_sources
+
+
+def test_sieve_uses_config_values(tmp_path):
+    config = tmp_path / "sieve.conf"
+    dup = tmp_path / "dups"
+    config.write_text(f"[global]\nread_size:2048\ndup_dir:{dup}\n")
+
+    s = sieve.Sieve(config_path=str(config))
+
+    assert s.read_size == 2048
+    assert s.dup_dir == str(dup.resolve())
+
+
+def test_sieve_cli_overrides_config(tmp_path):
+    config = tmp_path / "sieve.conf"
+    config_dup = tmp_path / "config-dups"
+    cli_dup = tmp_path / "cli-dups"
+    config.write_text(f"[global]\nread_size:2048\ndup_dir:{config_dup}\n")
+
+    s = sieve.Sieve(config_path=str(config), dup_dir=str(cli_dup), read_size=512)
+
+    assert s.read_size == 512
+    assert s.dup_dir == str(cli_dup.resolve())
+
+
+def test_sieve_rejects_invalid_read_size(tmp_path):
+    config = tmp_path / "sieve.conf"
+    config.write_text("[global]\nread_size:0\n")
+
+    with pytest.raises(ValueError, match="read_size"):
+        sieve.Sieve(config_path=str(config))
+
+
+def test_sieve_rejects_unusable_dup_dir(tmp_path):
+    bad_path = tmp_path / "not-a-dir"
+    bad_path.write_text("x")
+    config = tmp_path / "sieve.conf"
+    config.write_text(f"[global]\ndup_dir:{bad_path}\n")
+
+    with pytest.raises(ValueError, match="dup_dir"):
+        sieve.Sieve(config_path=str(config))

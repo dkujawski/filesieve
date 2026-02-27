@@ -67,6 +67,21 @@ For full details, run:
 filesieve --help
 ```
 
+
+## configuration
+
+You can pass an explicit config file with `--config /path/to/sieve.conf`.
+
+Configuration precedence order is:
+
+1. CLI args
+2. config file values
+3. in-code defaults
+
+Supported config values in `[global]` are `read_size` and `dup_dir`.
+`read_size` must be greater than `0` and `dup_dir` must be writable.
+
+
 ## Additional documentation
 
 - [Duplicate detection algorithm and caveats](docs/algorithm.md)
