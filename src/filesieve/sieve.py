@@ -11,7 +11,6 @@ from typing import DefaultDict
 
 DEFAULT_READ_SIZE = 1024
 DEFAULT_DUP_DIR = "/tmp/sieve/dups"
-CONFIG_FILE = "config/sieve.conf"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -19,10 +18,11 @@ LOGGER = logging.getLogger(__name__)
 class Sieve:
     """Initialize config state and identify duplicate files.
 
-    The main sieve.conf file can be in one of two places. First the
-    FILESIEVE_ROOT environment variable is checked. If this is not found,
-    the config file is assumed to live in the config dir three dirs up from
-    this module.
+    Configuration precedence order is:
+
+    1. explicit constructor values (CLI args)
+    2. optional config file values
+    3. in-code defaults
 
     Example ::
 
@@ -32,34 +32,80 @@ class Sieve:
 
     """
 
-    def __init__(self) -> None:
-        # set defaults from config
-        config = self.__get_config()
-        self.read_size = int(
-            config.get("global", "read_size", fallback=str(DEFAULT_READ_SIZE))
-        )
-        self.dup_dir = config.get("global", "dup_dir", fallback=DEFAULT_DUP_DIR)
+    def __init__(
+        self,
+        *,
+        config_path: str | None = None,
+        read_size: int | None = None,
+        dup_dir: str | None = None,
+    ) -> None:
+        config = self.__get_config(config_path)
+
+        merged_read_size = DEFAULT_READ_SIZE
+        merged_dup_dir = DEFAULT_DUP_DIR
+        if config is not None:
+            merged_read_size = int(
+                config.get("global", "read_size", fallback=str(merged_read_size))
+            )
+            merged_dup_dir = config.get("global", "dup_dir", fallback=merged_dup_dir)
+        if read_size is not None:
+            merged_read_size = read_size
+        if dup_dir is not None:
+            merged_dup_dir = dup_dir
+
+        self.read_size = self.__validate_read_size(merged_read_size)
+        self.dup_dir = self.__validate_dup_dir(merged_dup_dir)
         # dup trackers
         self.dup_keys = set()
         self.results: dict[str, list[dict[str, str]]] = {"duplicates_moved": []}
         # main data bucket
         self.data: DefaultDict[str, list[str]] = defaultdict(list)
 
-    def __get_config(self) -> ConfigParser:
-        """Find and load the config file."""
-        # where is the config file?
-        env_path = os.environ.get("FILESIEVE_ROOT")
-        if not env_path:
-            rel_path = os.path.join("../../../")
-            cur_path = os.path.abspath(__file__)
-            env_path = os.path.abspath(os.path.join(cur_path, rel_path))
-        # get config settings
-        config_path = os.path.join(env_path, CONFIG_FILE)
-        if not os.path.exists(config_path):
-            LOGGER.warning("Unable to locate config file, using defaults.")
+    def __get_config(self, config_path: str | None) -> ConfigParser | None:
+        """Load an optional config file from an explicit deterministic path."""
+        if config_path is None:
+            return None
+
+        resolved_path = os.path.abspath(config_path)
+        if not os.path.exists(resolved_path):
+            raise ValueError(f"Config file does not exist: {resolved_path}")
+
         config = ConfigParser()
-        config.read(config_path)
+        read_files = config.read(resolved_path)
+        if not read_files:
+            raise ValueError(f"Unable to read config file: {resolved_path}")
         return config
+
+    def __validate_read_size(self, read_size: int) -> int:
+        """Validate read_size is a positive integer."""
+        if not isinstance(read_size, int):
+            raise ValueError("Invalid config value for read_size: must be an integer")
+        if read_size <= 0:
+            raise ValueError("Invalid config value for read_size: must be greater than 0")
+        return read_size
+
+    def __validate_dup_dir(self, dup_dir: str) -> str:
+        """Validate dup_dir exists (or can be created) and is writable."""
+        resolved_path = os.path.abspath(dup_dir)
+
+        if os.path.exists(resolved_path) and not os.path.isdir(resolved_path):
+            raise ValueError(
+                f"Invalid config value for dup_dir: not a directory: {resolved_path}"
+            )
+
+        try:
+            os.makedirs(resolved_path, exist_ok=True)
+        except OSError as exc:
+            raise ValueError(
+                f"Invalid config value for dup_dir: cannot create directory {resolved_path}: {exc}"
+            ) from exc
+
+        if not os.access(resolved_path, os.W_OK):
+            raise ValueError(
+                f"Invalid config value for dup_dir: directory is not writable: {resolved_path}"
+            )
+
+        return resolved_path
 
     @property
     def dup_count(self) -> int:
@@ -80,7 +126,7 @@ class Sieve:
             return dict(self.data)
         # walk the base_dir, we don't care about directory names.
         for root, _, files in os.walk(base_dir):
-            for fn in files:
+            for fn in sorted(files):
                 # build the full pile path
                 fp = os.path.join(root, fn)
                 # process the file data to get the hash key
