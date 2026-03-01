@@ -1,17 +1,23 @@
 # filesieve
 
-`filesieve` is a command-line utility for finding duplicate files by content and moving duplicate copies into an alternate directory while leaving one original in place.
+`filesieve` is a command-line utility for finding exact duplicate files and
+moving duplicate copies into an alternate directory while leaving one canonical
+original in place.
 
-It started as a practical cleanup tool for merged media libraries where files often had different names but identical content.
+It is optimized for large media collections with:
+
+- staged exact hashing (size filter -> quick hash -> full hash -> byte verify),
+- optional perceptual media similarity clustering (images + video),
+- persistent SQLite signatures cache for faster repeated runs.
 
 ## Project overview
 
 - Walks one or more base directories recursively.
-- Computes a hash key for each file's content sample.
-- Keeps the first-seen file for each hash.
-- Moves later files with the same hash to a configurable duplicate directory.
+- Moves only exact byte-identical duplicates.
+- Keeps canonical file by oldest `mtime_ns`, then lexicographic path.
+- Emits perceptual media clusters as report-only output (no auto-move).
 
-See [Duplicate detection algorithm](docs/algorithm.md) for implementation details and caveats.
+See [Duplicate detection algorithm](docs/algorithm.md) for details.
 
 ## Supported Python versions
 
@@ -38,49 +44,81 @@ After install, the `filesieve` command is available in your shell.
 General form:
 
 ```bash
-filesieve [--alternate DUP_DIR] BASE_DIR [BASE_DIR ...]
+filesieve [OPTIONS] BASE_DIR [BASE_DIR ...]
 ```
+
+### Core options
+
+- `-a, --alternate DUP_DIR`: move exact duplicates here.
+- `-c, --config FILE`: optional config path.
+- `--mode {exact,media}`: duplicate mode (`media` default).
+- `--cache PATH`: SQLite cache path override.
+- `--no-cache`: disable persistent cache.
+- `--hash-workers N`: worker threads for exact hashing.
+- `--media-workers N`: worker threads for perceptual media stage.
+- `--ffmpeg PATH`: explicit `ffmpeg` path or executable name.
+- `--ffprobe PATH`: explicit `ffprobe` path or executable name.
+- `--report-similar PATH`: write perceptual media clusters JSON.
 
 ### Examples
 
-Use an explicit duplicate destination:
+Exact duplicate cleanup only:
 
 ```bash
-filesieve --alternate /tmp/sieve/dups ~/Music
+filesieve --mode exact --alternate /tmp/sieve/dups ~/Videos
 ```
 
-Process multiple roots in one run:
+Media mode with report output:
 
 ```bash
-filesieve --alternate /tmp/sieve/dups ~/Music ~/Videos
+filesieve --mode media --report-similar ./similar.json --alternate /tmp/sieve/dups ~/Photos ~/Videos
 ```
 
-Run through `uv` without installing globally:
+Run through `uv`:
 
 ```bash
 uv run filesieve --alternate /tmp/sieve/dups ./library
 ```
 
-For full details, run:
+For full details:
 
 ```bash
 filesieve --help
 ```
 
+## Configuration
 
-## configuration
+Pass a config with `--config /path/to/sieve.conf`.
 
-You can pass an explicit config file with `--config /path/to/sieve.conf`.
-
-Configuration precedence order is:
+Precedence order:
 
 1. CLI args
 2. config file values
 3. in-code defaults
 
-Supported config values in `[global]` are `read_size` and `dup_dir`.
-`read_size` must be greater than `0` and `dup_dir` must be writable.
+Example config:
 
+```ini
+[global]
+dup_dir:/tmp/sieve/dups
+mode:media
+cache_db:.filesieve-cache.sqlite
+hash_workers:8
+media_workers:2
+
+[media]
+enabled:true
+image_hamming_threshold:8
+video_hamming_threshold:32
+video_frame_hamming_threshold:12
+duration_bucket_seconds:2
+```
+
+## Safety model
+
+- File moves happen only for exact duplicates after byte-for-byte verification.
+- Perceptual matches are advisory in `similar_media_candidates` output only.
+- If FFmpeg tools are unavailable, perceptual stage is skipped automatically.
 
 ## Additional documentation
 

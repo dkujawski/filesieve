@@ -1,16 +1,20 @@
 #!/usr/bin/env python
 """CLI entrypoint for recursively finding duplicate files."""
 
+from __future__ import annotations
+
 import argparse
+import json
 import logging
 import os
 import sys
 
 from filesieve import sieve
 
-DESCRIPTION = """Recursively walk the base directory moving out any
-duplicate files into an alternate directory leaving only unique
-files remaining in the base directory tree.
+
+DESCRIPTION = """Recursively walk one or more base directories, moving exact
+duplicate files into an alternate directory while optionally generating
+perceptual similarity reports for media files.
 """
 
 LOGGER = logging.getLogger(__name__)
@@ -30,11 +34,11 @@ def is_createable_dir(path_str: str) -> str:
     resolved_path = os.path.abspath(path_str)
     if not (os.path.exists(resolved_path) and os.path.isdir(resolved_path)):
         try:
-            os.mkdir(resolved_path)
-        except OSError as e:
+            os.makedirs(resolved_path, exist_ok=True)
+        except OSError as exc:
             msg = (
                 "unable to create alternate directory for duplicate files:"
-                f"\n\t{resolved_path}\n{str(e)}"
+                f"\n\t{resolved_path}\n{str(exc)}"
             )
             raise argparse.ArgumentTypeError(msg)
     return resolved_path
@@ -53,13 +57,54 @@ def build_parser() -> argparse.ArgumentParser:
     """Build and return the command line parser."""
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument(
-        '-c', '--config', type=is_valid_config,
-        help='optional config file path (precedence: CLI args > config file > defaults)'
+        "-c",
+        "--config",
+        type=is_valid_config,
+        help="optional config file path (precedence: CLI args > config file > defaults)",
     )
-    parser.add_argument('-a', '--alternate', type=is_createable_dir,
-                        help='move all duplicate files into this directory')
-    parser.add_argument('base', nargs='+', type=is_valid_dir,
-                        help='the base directory tree to search')
+    parser.add_argument(
+        "-a",
+        "--alternate",
+        type=is_createable_dir,
+        help="move exact duplicate files into this directory",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("exact", "media"),
+        help="duplicate detection mode (exact or media)",
+    )
+    parser.add_argument(
+        "--cache",
+        help="sqlite path for persistent signature cache",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="disable cache usage for this run",
+    )
+    parser.add_argument(
+        "--hash-workers",
+        type=int,
+        help="number of worker threads for exact hashing",
+    )
+    parser.add_argument(
+        "--media-workers",
+        type=int,
+        help="number of worker threads for media perceptual signatures",
+    )
+    parser.add_argument(
+        "--ffmpeg",
+        help="path or executable name for ffmpeg",
+    )
+    parser.add_argument(
+        "--ffprobe",
+        help="path or executable name for ffprobe",
+    )
+    parser.add_argument(
+        "--report-similar",
+        help="write perceptual media similarity clusters to this JSON file",
+    )
+    parser.add_argument("base", nargs="+", type=is_valid_dir, help="base directory tree(s)")
     return parser
 
 
@@ -70,19 +115,36 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        s = sieve.Sieve(config_path=args.config, dup_dir=args.alternate)
+        engine = sieve.Sieve(
+            config_path=args.config,
+            dup_dir=args.alternate,
+            mode=args.mode,
+            cache_db=args.cache,
+            no_cache=args.no_cache,
+            hash_workers=args.hash_workers,
+            media_workers=args.media_workers,
+            ffmpeg_path=args.ffmpeg,
+            ffprobe_path=args.ffprobe,
+        )
     except ValueError as exc:
         parser.error(str(exc))
 
-    if not args.base:
-        parser.error("at least one base directory must be provided")
+    LOGGER.info("Processing %d base path(s)", len(args.base))
+    engine.walk_many(args.base)
 
-    for path in args.base:
-        LOGGER.info("Processing base path: %s", path)
-        s.walk(path)
+    if args.report_similar:
+        report_path = os.path.abspath(args.report_similar)
+        parent = os.path.dirname(report_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        payload = engine.results.get("similar_media_candidates", [])
+        with open(report_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+        LOGGER.info("Wrote %d similar-media clusters to %s", len(payload), report_path)
 
     return 0
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     sys.exit(main())
-    
