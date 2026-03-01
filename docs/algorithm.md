@@ -1,49 +1,66 @@
 # Duplicate detection algorithm
 
-`filesieve` identifies duplicate files using a content-derived hash key.
+`filesieve` uses a staged pipeline optimized for large media libraries while preserving
+zero-risk duplicate moves.
 
-## Hash strategy
+## Pipeline overview
 
-The algorithm is implemented in `filesieve.sieve` and works as follows:
+1. Inventory scan:
+   - Recursively enumerate files using iterative `os.scandir`.
+   - Collect metadata: path, size, `mtime_ns`, `st_dev`, `st_ino`, extension, media kind.
+   - Build size groups (`size -> files`) to avoid hashing singleton sizes.
 
-1. Recursively walk each input base directory.
-2. For each file, build a byte chunk used as hash input:
-   - **Small file** (`size <= 2 * read_size`): read the entire file.
-   - **Large file** (`size > 2 * read_size`): read only the first `read_size` bytes and last `read_size` bytes, then concatenate.
-3. Compute an MD5 digest of that byte chunk.
-4. If this digest has not been seen, keep the file in place.
-5. If the digest has already been seen, treat file as duplicate and move it to `dup_dir` preserving a mirrored path.
+2. Exact duplicate stage (always on):
+   - For size groups with more than one file, compute `quick_hash`:
+     - `BLAKE2b(digest_size=16)` over three 64 KiB samples at offsets:
+       `0`, `size//2`, and `size-64KiB` (clamped).
+   - For colliding quick-hash groups, compute streaming `full_hash`:
+     - `BLAKE2b(digest_size=32)` over full bytes.
+   - For colliding full-hash groups:
+     - Keep canonical file = oldest `mtime_ns`, then lexicographic path.
+     - Verify each candidate with chunked byte comparison (1 MiB chunks).
+     - Move only when byte-compare succeeds.
 
-Defaults:
+3. Perceptual media stage (mode=`media` only):
+   - Optional FFmpeg/FFprobe stage for images and video.
+   - If tools are missing, stage is skipped and exact mode continues.
+   - Image signature:
+     - Decode one frame, scale to `9x8`, grayscale, compute 64-bit dHash.
+   - Video signature:
+     - Probe duration, sample frames at `10%`, `35%`, `65%`, `90%`.
+     - Per frame: scale to `9x8`, grayscale, compute 64-bit dHash.
+     - Combined signature is 4 x 64-bit hashes.
+   - Candidate blocking:
+     - Image key: `(width_bucket, height_bucket, hash_prefix16)`.
+     - Video key: `(duration_bucket_2s, aspect_ratio_bucket, first_hash_prefix16)`.
+   - Similarity thresholds:
+     - Image: Hamming distance `<= image_hamming_threshold` (default `8`).
+     - Video: total Hamming `<= video_hamming_threshold` (default `32`) and
+       each frame `<= video_frame_hamming_threshold` (default `12`).
+   - Output is report-only (`similar_media_candidates`). Perceptual matches are not moved.
 
-- `read_size`: `1024` bytes
+4. Persistent signature cache:
+   - SQLite cache stores exact and media signatures for repeated runs.
+   - Cache identity requires unchanged `(path, size, mtime_ns, st_dev, st_ino)`.
+   - Stale rows are pruned after each run.
+
+## Default behavior
+
+- `mode`: `media`
 - `dup_dir`: `/tmp/sieve/dups`
+- `cache_db`: `.filesieve-cache.sqlite`
+- `hash_workers`: `min(16, max(4, cpu_count * 2))`
+- `media_workers`: `max(2, cpu_count // 2)`
+- `image_hamming_threshold`: `8`
+- `video_hamming_threshold`: `32`
+- `video_frame_hamming_threshold`: `12`
+- `duration_bucket_seconds`: `2`
 
-Both values can be configured via `config/sieve.conf`.
+## Safety guarantees
 
-## Why this strategy
-
-Reading only head + tail data for larger files is much faster than hashing full large files, especially for media collections. It is a practical speed/accuracy tradeoff.
-
-## Caveats and collision considerations
-
-### Sampling caveat (most important)
-
-For large files, only the first and last chunks are hashed. Two files with identical prefixes/suffixes but different middle content can be incorrectly identified as duplicates.
-
-### MD5 collision caveat
-
-MD5 is not collision-resistant for adversarial scenarios. In most non-malicious personal library cleanup workflows this is acceptable, but there is still a non-zero collision risk.
-
-### Operational guidance
-
-If false positives are unacceptable:
-
-- Increase `read_size` in config.
-- Add a secondary full-file verification step before moving duplicates.
-- Consider replacing MD5 with a stronger digest (for example SHA-256) while retaining sampling or switching to full-file hashing.
-
-## Behavior notes
-
-- The "original" file retained is simply the first file encountered during directory traversal.
-- Duplicate moves preserve path structure underneath `dup_dir`.
+- Exact duplicate moves require:
+  1. same file size,
+  2. same quick hash,
+  3. same full hash,
+  4. byte-for-byte verification.
+- Perceptual-only matches are advisory and never auto-moved.

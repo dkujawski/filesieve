@@ -1,169 +1,170 @@
-import hashlib
 import os
-import shutil
 
 import pytest
 
 from filesieve import sieve
 
 
-@pytest.fixture
-def test_data_dir() -> str:
-    return os.path.join(os.path.abspath(os.path.dirname(__file__)), "data")
-
-
-@pytest.fixture
-def sieve_tree(tmp_path, test_data_dir):
+def test_walk_moves_newer_exact_duplicate_and_records_kept(tmp_path):
     src = tmp_path / "src"
-    dup = tmp_path / "dup"
-    shutil.copytree(test_data_dir, src)
-    dup.mkdir()
-    return src, dup
-
-
-def test_walk_moves_only_later_duplicates(sieve_tree):
-    src, dup = sieve_tree
-    s = sieve.Sieve()
-    s.dup_dir = str(dup)
-
-    found = s.walk(str(src))
-
-    assert found == {
-        "787ada88e6c442bb3ec6b30c97b9126c": [str(src / "big_diff.log")],
-        "c86eaa9d51d51dfe1a6a404739f62303": [str(src / "small_diff.log")],
-        "5819b7a15d098be2c28f04e6edfb7515": [str(src / "big_copy.log")],
-        "ca77696740831b2ac340f71140e641cb": [str(src / "small_copy.log")],
-    }
-    assert s.dup_count == 2
-
-    moved_sources = {entry["source"] for entry in s.results["duplicates_moved"]}
-    assert moved_sources == {str(src / "big_orig.log"), str(src / "small_orig.log")}
-
-    assert (src / "big_copy.log").exists()
-    assert (src / "small_copy.log").exists()
-    assert not (src / "big_orig.log").exists()
-    assert not (src / "small_orig.log").exists()
-
-    assert (dup / str(src / "big_orig.log").lstrip("/")).exists()
-    assert (dup / str(src / "small_orig.log").lstrip("/")).exists()
-
-
-def test_clean_dup_moves_file_into_mirrored_path(sieve_tree):
-    src, dup = sieve_tree
-    dup_file = src / "small_copy.log"
-
-    sieve.clean_dup(str(dup_file), str(dup))
-
-    expected = dup / str(dup_file).lstrip("/")
-    assert expected.exists()
-    assert not dup_file.exists()
-
-
-def test_clean_dup_keeps_distinct_duplicate_paths(tmp_path):
-    dup = tmp_path / "dup"
-    dup.mkdir()
-
-    left = tmp_path / "a" / "dup.log"
-    right = tmp_path / "b" / "dup.log"
-    left.parent.mkdir()
-    right.parent.mkdir()
-    left.write_text("first")
-    right.write_text("second")
-
-    sieve.clean_dup(str(left), str(dup))
-    sieve.clean_dup(str(right), str(dup))
-
-    left_dest = dup / str(left).lstrip("/")
-    right_dest = dup / str(right).lstrip("/")
-    assert left_dest.exists()
-    assert right_dest.exists()
-    assert left_dest.read_text() == "first"
-    assert right_dest.read_text() == "second"
-
-
-def test_get_hash_key():
-    expected = "e4578cd35d06171139bad5b66adca0fc"
-    data = os.path.join(os.path.abspath(os.path.dirname(__file__)), "data", "small_orig.log")
-    with open(data, "rb") as fh:
-        found = sieve.get_hash_key(fh.read())
-    assert expected == found
-
-
-def test_get_hash_key_is_binary_safe():
-    binary_data = b"\x00\xff\x00\x80filesieve\n\x10"
-    expected = hashlib.md5(binary_data).hexdigest()
-
-    assert sieve.get_hash_key(binary_data) == expected
-    assert sieve.get_hash_key(bytearray(binary_data)) == expected
-
-
-def test_get_hash_key_rejects_non_binary_input():
-    with pytest.raises(TypeError):
-        sieve.get_hash_key("not-bytes")
-
-
-def test_walk_logs_and_continues_on_move_failure(sieve_tree, monkeypatch, caplog):
-    src, dup = sieve_tree
-    s = sieve.Sieve()
-    s.dup_dir = str(dup)
-
-    original_clean_dup = sieve.clean_dup
-
-    def fail_clean_dup(path, dup_dir):
-        if path.endswith("small_orig.log"):
-            raise OSError("boom")
-        return original_clean_dup(path, dup_dir)
-
-    monkeypatch.setattr(sieve, "clean_dup", fail_clean_dup)
-
-    with caplog.at_level("ERROR"):
-        found = s.walk(str(src))
-
-    assert found["ca77696740831b2ac340f71140e641cb"] == [str(src / "small_copy.log")]
-    assert (src / "small_orig.log").exists()
-    assert any("Unable to move duplicate file" in rec.message for rec in caplog.records)
-
-    moved_sources = {entry["source"] for entry in s.results["duplicates_moved"]}
-    assert str(src / "big_orig.log") in moved_sources
-    assert str(src / "small_orig.log") not in moved_sources
-
-
-def test_sieve_uses_config_values(tmp_path):
-    config = tmp_path / "sieve.conf"
     dup = tmp_path / "dups"
-    config.write_text(f"[global]\nread_size:2048\ndup_dir:{dup}\n")
+    src.mkdir()
+    dup.mkdir()
 
-    s = sieve.Sieve(config_path=str(config))
+    older = src / "older.bin"
+    newer = src / "newer.bin"
+    payload = b"same-content" * 2048
+    older.write_bytes(payload)
+    newer.write_bytes(payload)
+    os.utime(older, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(newer, ns=(2_000_000_000, 2_000_000_000))
 
-    assert s.read_size == 2048
-    assert s.dup_dir == str(dup.resolve())
+    engine = sieve.Sieve(mode="exact", dup_dir=str(dup), no_cache=True, hash_workers=1)
+    engine.walk(str(src))
 
-
-def test_sieve_cli_overrides_config(tmp_path):
-    config = tmp_path / "sieve.conf"
-    config_dup = tmp_path / "config-dups"
-    cli_dup = tmp_path / "cli-dups"
-    config.write_text(f"[global]\nread_size:2048\ndup_dir:{config_dup}\n")
-
-    s = sieve.Sieve(config_path=str(config), dup_dir=str(cli_dup), read_size=512)
-
-    assert s.read_size == 512
-    assert s.dup_dir == str(cli_dup.resolve())
-
-
-def test_sieve_rejects_invalid_read_size(tmp_path):
-    config = tmp_path / "sieve.conf"
-    config.write_text("[global]\nread_size:0\n")
-
-    with pytest.raises(ValueError, match="read_size"):
-        sieve.Sieve(config_path=str(config))
+    assert engine.dup_count == 1
+    moved = engine.results["duplicates_moved"][0]
+    assert moved["kept"] == str(older.resolve())
+    assert moved["source"] == str(newer.resolve())
+    assert not newer.exists()
+    assert os.path.exists(moved["destination"])
 
 
-def test_sieve_rejects_unusable_dup_dir(tmp_path):
-    bad_path = tmp_path / "not-a-dir"
-    bad_path.write_text("x")
-    config = tmp_path / "sieve.conf"
-    config.write_text(f"[global]\ndup_dir:{bad_path}\n")
+def test_walk_keeps_same_size_non_duplicates(tmp_path):
+    src = tmp_path / "src"
+    dup = tmp_path / "dups"
+    src.mkdir()
+    dup.mkdir()
 
-    with pytest.raises(ValueError, match="dup_dir"):
-        sieve.Sieve(config_path=str(config))
+    left = src / "left.bin"
+    right = src / "right.bin"
+    left.write_bytes(b"A" * 4096)
+    right.write_bytes(b"B" * 4096)
+
+    engine = sieve.Sieve(mode="exact", dup_dir=str(dup), no_cache=True, hash_workers=1)
+    engine.walk(str(src))
+
+    assert engine.dup_count == 0
+    assert left.exists()
+    assert right.exists()
+
+
+def test_walk_many_dedupes_across_roots(tmp_path):
+    root_a = tmp_path / "a"
+    root_b = tmp_path / "b"
+    dup = tmp_path / "dups"
+    root_a.mkdir()
+    root_b.mkdir()
+    dup.mkdir()
+
+    left = root_a / "track.mp3"
+    right = root_b / "track-copy.mp3"
+    left.write_bytes(b"audio-same" * 1024)
+    right.write_bytes(b"audio-same" * 1024)
+    os.utime(left, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(right, ns=(2_000_000_000, 2_000_000_000))
+
+    engine = sieve.Sieve(mode="exact", dup_dir=str(dup), no_cache=True, hash_workers=1)
+    engine.walk_many([str(root_a), str(root_b)])
+
+    assert engine.dup_count == 1
+    moved = engine.results["duplicates_moved"][0]
+    assert moved["kept"] == str(left.resolve())
+    assert moved["source"] == str(right.resolve())
+
+
+def test_repeated_run_uses_cache_hits(tmp_path):
+    src = tmp_path / "src"
+    dup = tmp_path / "dups"
+    cache_db = tmp_path / "cache.sqlite"
+    src.mkdir()
+    dup.mkdir()
+
+    left = src / "left.bin"
+    right = src / "right.bin"
+    left.write_bytes((b"A" * 1000) + (b"C" * 1000))
+    right.write_bytes((b"B" * 1000) + (b"D" * 1000))
+
+    engine = sieve.Sieve(
+        mode="exact",
+        dup_dir=str(dup),
+        cache_db=str(cache_db),
+        no_cache=False,
+        hash_workers=1,
+    )
+    engine.walk(str(src))
+    first_ratio = engine.results["stats"]["cache_hit_ratio"]
+
+    engine.walk(str(src))
+    second_ratio = engine.results["stats"]["cache_hit_ratio"]
+
+    assert first_ratio <= second_ratio
+    assert second_ratio >= 0.90
+
+
+def test_sieve_uses_config_values_and_cli_overrides(tmp_path):
+    config_path = tmp_path / "sieve.conf"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[global]",
+                f"dup_dir:{tmp_path / 'config-dups'}",
+                "mode:exact",
+                f"cache_db:{tmp_path / 'cache-from-config.sqlite'}",
+                "hash_workers:3",
+                "media_workers:2",
+                "[media]",
+                "enabled:true",
+                "image_hamming_threshold:7",
+                "video_hamming_threshold:31",
+                "video_frame_hamming_threshold:11",
+                "duration_bucket_seconds:4",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    from_config = sieve.Sieve(config_path=str(config_path))
+    assert from_config.mode == "exact"
+    assert from_config.hash_workers == 3
+    assert from_config.media_workers == 2
+    assert from_config.image_hamming_threshold == 7
+    assert from_config.video_hamming_threshold == 31
+    assert from_config.video_frame_hamming_threshold == 11
+    assert from_config.duration_bucket_seconds == 4
+
+    overridden = sieve.Sieve(
+        config_path=str(config_path),
+        mode="media",
+        hash_workers=5,
+        media_workers=4,
+    )
+    assert overridden.mode == "media"
+    assert overridden.hash_workers == 5
+    assert overridden.media_workers == 4
+
+
+def test_media_mode_logs_fallback_when_tools_missing(tmp_path, caplog):
+    src = tmp_path / "src"
+    dup = tmp_path / "dups"
+    src.mkdir()
+    dup.mkdir()
+    (src / "frame.jpg").write_bytes(b"jpeg-like-bytes")
+
+    engine = sieve.Sieve(
+        mode="media",
+        dup_dir=str(dup),
+        no_cache=True,
+        ffmpeg_path="definitely-missing-ffmpeg",
+        ffprobe_path="definitely-missing-ffprobe",
+    )
+    with caplog.at_level("WARNING"):
+        engine.walk(str(src))
+
+    assert engine.results["similar_media_candidates"] == []
+    assert any("skipping perceptual media stage" in rec.message for rec in caplog.records)
+
+
+def test_sieve_rejects_invalid_mode(tmp_path):
+    with pytest.raises(ValueError, match="Invalid mode"):
+        sieve.Sieve(mode="invalid-mode", dup_dir=str(tmp_path / "dups"))
