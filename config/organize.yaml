@@ -1,0 +1,5 @@
+# filesieve organizer config
+preset: plex
+duplicates_dir_name: Duplicates
+unsorted_dir_name: Unsorted
+dry_run: true

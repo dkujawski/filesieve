@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 
+from filesieve import organize
 from filesieve import sieve
 
 
@@ -104,7 +105,38 @@ def build_parser() -> argparse.ArgumentParser:
         "--report-similar",
         help="write perceptual media similarity clusters to this JSON file",
     )
-    parser.add_argument("base", nargs="+", type=is_valid_dir, help="base directory tree(s)")
+    parser.add_argument(
+        "--organize-media",
+        action="store_true",
+        help="run media organizer workflow (plex preset)",
+    )
+    parser.add_argument(
+        "--organize-ui",
+        action="store_true",
+        help="open native organizer UI",
+    )
+    parser.add_argument(
+        "--organize-target",
+        help="target root for media organization",
+    )
+    parser.add_argument(
+        "--organize-config",
+        help="YAML config path for organizer behavior",
+    )
+    parser.add_argument(
+        "--organize-state-db",
+        help="state sqlite path for organizer idempotency",
+    )
+    parser.add_argument(
+        "--organize-apply",
+        action="store_true",
+        help="apply organizer moves (default is dry-run)",
+    )
+    parser.add_argument(
+        "--organize-report",
+        help="write organizer operations JSON report",
+    )
+    parser.add_argument("base", nargs="*", type=is_valid_dir, help="base directory tree(s)")
     return parser
 
 
@@ -113,6 +145,66 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO)
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.organize_media or args.organize_ui:
+        if not args.base and not args.organize_ui:
+            parser.error("at least one BASE directory is required for --organize-media")
+        target_root = (
+            os.path.abspath(args.organize_target)
+            if args.organize_target
+            else os.path.abspath(
+                os.path.join((args.base[0] if args.base else os.getcwd()), "organized")
+            )
+        )
+        config_path = args.organize_config
+        if config_path is None:
+            default_config = os.path.abspath(organize.DEFAULT_CONFIG_PATH)
+            if not os.path.exists(default_config):
+                organize.write_default_yaml(default_config)
+            config_path = default_config
+        config = organize.load_yaml_config(config_path)
+        state_db = os.path.abspath(
+            args.organize_state_db
+            if args.organize_state_db
+            else os.path.join(target_root, organize.DEFAULT_STATE_DB)
+        )
+        dry_run = not args.organize_apply
+
+        if args.organize_ui:
+            def _factory(sources: list[str], target: str, is_dry_run: bool) -> organize.MediaOrganizer:
+                return organize.MediaOrganizer(
+                    sources=sources,
+                    target_root=target,
+                    config=config,
+                    state_db=state_db,
+                    dry_run=is_dry_run,
+                )
+
+            app = organize.OrganizerUI(_factory, default_target=target_root)
+            app.run()
+            return 0
+
+        runner = organize.MediaOrganizer(
+            sources=args.base,
+            target_root=target_root,
+            config=config,
+            state_db=state_db,
+            dry_run=dry_run,
+        )
+        result = runner.run(progress=lambda item: LOGGER.info("organize progress: %s", item))
+        runner.close()
+        if args.organize_report:
+            report_path = os.path.abspath(args.organize_report)
+            parent = os.path.dirname(report_path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(report_path, "w", encoding="utf-8") as fh:
+                json.dump(result, fh, indent=2, sort_keys=True)
+                fh.write("\n")
+        return 0
+
+    if not args.base:
+        parser.error("at least one BASE directory is required")
 
     try:
         engine = sieve.Sieve(

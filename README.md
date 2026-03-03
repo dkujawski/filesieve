@@ -86,6 +86,44 @@ For full details:
 filesieve --help
 ```
 
+
+### Media organizer mode (Plex preset)
+
+`filesieve` also supports organizing video media into a Plex-friendly structure with idempotent state tracking, duplicate routing, dry-run previews, and optional native UI.
+
+CLI dry-run example:
+
+```bash
+filesieve --organize-media --organize-target /media/library --organize-report ./organize-report.json ~/Downloads ~/Staging
+```
+
+Apply changes:
+
+```bash
+filesieve --organize-media --organize-apply --organize-target /media/library ~/Downloads ~/Staging
+```
+
+Open native UI (source selection, target configuration, progress, pause/continue/stop):
+
+```bash
+filesieve --organize-ui --organize-target /media/library
+```
+
+Organizer options:
+
+- `--organize-config PATH`: YAML organizer config (see `config/organize.yaml`).
+- `--organize-state-db PATH`: SQLite state for idempotency and re-runs.
+- `--organize-apply`: apply moves (default is dry-run).
+- `--organize-report PATH`: write JSON report of planned/executed operations.
+
+Behavior notes:
+
+- Non-media files are ignored.
+- Unknown media naming falls into `Unsorted`.
+- Duplicates are moved to `Duplicates` and canonical picks highest parsed quality.
+- On destination conflicts, version suffixes are appended.
+- On Windows, cross-drive moves use copy+verify+delete for safety.
+
 ## Configuration
 
 Pass a config with `--config /path/to/sieve.conf`.
