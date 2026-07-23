@@ -23,3 +23,5 @@ All notable user-visible changes to FileSieve are documented here.
 
 - Add opt-in FFmpeg functional coverage for recovered image collections through
   the `FILESIEVE_RECOVERED_DIR` environment variable.
+- Add `--move-similar` for explicitly moving perceptual duplicates while
+  retaining the highest-resolution member of each cluster.

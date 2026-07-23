@@ -37,7 +37,11 @@ zero-risk duplicate moves.
      - Image: Hamming distance `<= image_hamming_threshold` (default `8`).
      - Video: total Hamming `<= video_hamming_threshold` (default `32`) and
        each frame `<= video_frame_hamming_threshold` (default `12`).
-   - Output is report-only (`similar_media_candidates`). Perceptual matches are not moved.
+   - Output is report-only (`similar_media_candidates`) by default.
+   - With `--move-similar`, retain the greatest pixel-area member of each
+     cluster and move the remaining members to the alternate directory.
+   - Resolution ties prefer file size, oldest `mtime_ns`, then lexicographic
+     path.
 
 4. Persistent signature cache:
    - SQLite cache stores exact and media signatures for repeated runs.
@@ -64,3 +68,4 @@ zero-risk duplicate moves.
   3. same full hash,
   4. byte-for-byte verification.
 - Perceptual-only matches are advisory and never auto-moved.
+- Perceptual moves require the explicit `--move-similar` flag.
