@@ -2,23 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import hashlib
 import logging
 import os
-from configparser import ConfigParser
-from time import perf_counter
 import uuid
+from configparser import ConfigParser
+from dataclasses import dataclass, field
+from time import perf_counter
 
 from filesieve.cache import SignatureCache
-from filesieve.exact import ExactFileMeta, clean_dup, quick_hash, run_exact_pipeline
+from filesieve.exact import ExactFileMeta, quick_hash, run_exact_pipeline
 from filesieve.media import (
     IMAGE_KIND,
     VIDEO_KIND,
     MediaFileMeta,
     run_media_pipeline,
 )
-
 
 LOGGER = logging.getLogger(__name__)
 

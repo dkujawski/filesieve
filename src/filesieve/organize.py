@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 import hashlib
-import json
 import os
 import queue
 import re
@@ -13,6 +10,8 @@ import shutil
 import sqlite3
 import threading
 import time
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 

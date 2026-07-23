@@ -1,8 +1,6 @@
 import hashlib
 import os
 
-import pytest
-
 from filesieve import exact
 
 

@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
 import json
 import logging
 import os
 import shutil
 import subprocess
+from collections import defaultdict
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from typing import Callable, Iterable, TypeVar
 
 from filesieve.cache import SignatureCache
-
 
 LOGGER = logging.getLogger(__name__)
 

@@ -1,7 +1,5 @@
 import os
 
-import pytest
-
 from filesieve import media
 
 
