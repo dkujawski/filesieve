@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from filesieve import media
+from filesieve import media, sieve
 
 pytestmark = pytest.mark.functional
 
@@ -120,3 +120,59 @@ def test_recovered_scaled_images_cluster():
     assert set(result.similar_media_candidates[0]["paths"]) == {
         str(path) for path in samples
     }
+
+
+def test_recovered_scaled_move_keeps_highest_resolution(tmp_path):
+    recovered_env = os.environ.get("FILESIEVE_RECOVERED_DIR")
+    if recovered_env is None:
+        pytest.skip("set FILESIEVE_RECOVERED_DIR to run recovered-image tests")
+
+    fixture_dir = Path(recovered_env) / "test_01"
+    recovered_samples = sorted(fixture_dir.glob("*.png"))
+    if len(recovered_samples) != 2:
+        pytest.skip("recovered/test_01 must contain exactly two PNG images")
+
+    source = tmp_path / "source"
+    duplicate_dir = tmp_path / "duplicates"
+    source.mkdir()
+    samples: list[Path] = []
+    for recovered_sample in recovered_samples:
+        sample = source / recovered_sample.name
+        shutil.copy2(recovered_sample, sample)
+        samples.append(sample)
+
+    ffmpeg_bin, ffprobe_bin = media.resolve_media_tools(
+        ffmpeg_path=None,
+        ffprobe_path=None,
+    )
+    if ffmpeg_bin is None or ffprobe_bin is None:
+        pytest.skip("recovered-image tests require FFmpeg and FFprobe")
+    dimensions = {
+        path: media._probe_media(str(path), ffprobe_bin=ffprobe_bin)
+        for path in samples
+    }
+    expected_kept = max(
+        samples,
+        key=lambda path: dimensions[path]["width"] * dimensions[path]["height"],
+    )
+    expected_moved = next(path for path in samples if path != expected_kept)
+
+    engine = sieve.Sieve(
+        mode="media",
+        move_similar=True,
+        dup_dir=str(duplicate_dir),
+        no_cache=True,
+        hash_workers=1,
+        media_workers=2,
+        ffmpeg_path=ffmpeg_bin,
+        ffprobe_path=ffprobe_bin,
+    )
+    engine.walk(str(source))
+
+    assert expected_kept.exists()
+    assert not expected_moved.exists()
+    assert engine.dup_count == 1
+    move = engine.results["duplicates_moved"][0]
+    assert move["kept"] == str(expected_kept)
+    assert move["source"] == str(expected_moved)
+    assert move["reason"] == "perceptual-similar"

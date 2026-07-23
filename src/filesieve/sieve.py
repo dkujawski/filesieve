@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from time import perf_counter
 
 from filesieve.cache import SignatureCache
-from filesieve.exact import ExactFileMeta, quick_hash, run_exact_pipeline
+from filesieve.exact import ExactFileMeta, clean_dup, quick_hash, run_exact_pipeline
 from filesieve.media import (
     IMAGE_KIND,
     VIDEO_KIND,
@@ -138,6 +138,7 @@ class Sieve:
         video_hamming_threshold: int | None = None,
         video_frame_hamming_threshold: int | None = None,
         duration_bucket_seconds: int | None = None,
+        move_similar: bool = False,
     ) -> None:
         config = self.__get_config(config_path)
 
@@ -228,6 +229,9 @@ class Sieve:
 
         self.dup_dir = self.__validate_dup_dir(merged_dup_dir)
         self.mode = self.__validate_mode(merged_mode)
+        self.move_similar = bool(move_similar)
+        if self.move_similar and self.mode != "media":
+            raise ValueError("--move-similar requires --mode media")
         self.no_cache = bool(no_cache)
         self.cache_db = None if self.no_cache else self.__validate_cache_db(merged_cache_db)
         self.hash_workers = self.__validate_positive_int("hash_workers", merged_hash_workers)
@@ -404,6 +408,14 @@ class Sieve:
             self.results["similar_media_candidates"] = media_result.similar_media_candidates
             self.stats.cache_hits += media_result.cache_hits
             self.stats.cache_misses += media_result.cache_misses
+            if self.move_similar:
+                similar_moves = self._move_similar_clusters(
+                    clusters=media_result.similar_media_candidates,
+                    media_metadata=media_result.media_metadata,
+                    files=files,
+                    moved_paths=exact_result.moved_paths,
+                )
+                self.results["duplicates_moved"].extend(similar_moves)
         self.stats.timings_by_stage["media"] = perf_counter() - media_start
 
         if cache is not None:
@@ -420,6 +432,79 @@ class Sieve:
 
         self.results["stats"] = self.stats.as_dict()
         return dict(self.data)
+
+    def _move_similar_clusters(
+        self,
+        *,
+        clusters: list[dict[str, object]],
+        media_metadata: dict[str, dict[str, object]],
+        files: list[FileMeta],
+        moved_paths: set[str],
+    ) -> list[dict[str, str]]:
+        file_by_path = {meta.path: meta for meta in files}
+        operations: list[dict[str, str]] = []
+
+        for cluster in clusters:
+            paths = [
+                path
+                for path in cluster.get("paths", [])
+                if isinstance(path, str)
+                and path not in moved_paths
+                and path in file_by_path
+                and os.path.exists(path)
+            ]
+            if len(paths) <= 1:
+                continue
+
+            kept = min(
+                paths,
+                key=lambda path: self._similar_canonical_rank(
+                    path,
+                    media_metadata=media_metadata,
+                    file_by_path=file_by_path,
+                ),
+            )
+            cluster_moves: list[dict[str, str]] = []
+            for source in sorted(path for path in paths if path != kept):
+                try:
+                    destination = clean_dup(source, self.dup_dir)
+                except OSError:
+                    LOGGER.exception("Unable to move perceptual duplicate file: %s", source)
+                    continue
+                operation = {
+                    "source": source,
+                    "destination": destination,
+                    "kept": kept,
+                    "reason": "perceptual-similar",
+                }
+                moved_paths.add(source)
+                operations.append(operation)
+                cluster_moves.append(operation)
+
+            cluster["kept"] = kept
+            cluster["moved"] = cluster_moves
+
+        if operations:
+            LOGGER.info("Moved %d perceptual duplicate file(s)", len(operations))
+        return operations
+
+    def _similar_canonical_rank(
+        self,
+        path: str,
+        *,
+        media_metadata: dict[str, dict[str, object]],
+        file_by_path: dict[str, FileMeta],
+    ) -> tuple[int, int, int, str]:
+        metadata = media_metadata.get(path, {})
+        width = max(0, int(metadata.get("width", 0)))
+        height = max(0, int(metadata.get("height", 0)))
+        file_meta = file_by_path[path]
+        return (
+            -(width * height),
+            -file_meta.size,
+            file_meta.mtime_ns,
+            path,
+        )
 
     def _scan_base_dir(self, base_dir: str) -> list[FileMeta]:
         """Inventory files recursively using iterative scandir traversal."""

@@ -43,6 +43,7 @@ class MediaPipelineResult:
     """Output of media perceptual-stage processing."""
 
     similar_media_candidates: list[dict[str, object]]
+    media_metadata: dict[str, dict[str, object]]
     cache_hits: int
     cache_misses: int
     tools_available: bool
@@ -356,6 +357,7 @@ def run_media_pipeline(
         )
         return MediaPipelineResult(
             similar_media_candidates=[],
+            media_metadata={},
             cache_hits=0,
             cache_misses=0,
             tools_available=False,
@@ -369,6 +371,7 @@ def run_media_pipeline(
     if not candidates:
         return MediaPipelineResult(
             similar_media_candidates=[],
+            media_metadata={},
             cache_hits=0,
             cache_misses=0,
             tools_available=True,
@@ -530,6 +533,10 @@ def run_media_pipeline(
 
     return MediaPipelineResult(
         similar_media_candidates=similar_media_candidates,
+        media_metadata={
+            path: dict(media_meta)
+            for path, (_, media_meta) in signatures_by_path.items()
+        },
         cache_hits=cache_hits,
         cache_misses=cache_misses,
         tools_available=True,
