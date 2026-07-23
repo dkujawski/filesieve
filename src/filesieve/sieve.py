@@ -349,11 +349,17 @@ class Sieve:
 
         scan_start = perf_counter()
         files: list[FileMeta] = []
+        seen_paths: set[str] = set()
         for base_dir in base_dirs:
             if not os.path.exists(base_dir):
                 LOGGER.error("Base directory tree does not exist: %s", base_dir)
                 continue
-            files.extend(self._scan_base_dir(base_dir))
+            for meta in self._scan_base_dir(base_dir):
+                path_key = os.path.normcase(meta.path)
+                if path_key in seen_paths:
+                    continue
+                seen_paths.add(path_key)
+                files.append(meta)
         self.stats.timings_by_stage["scan"] = perf_counter() - scan_start
         self.stats.files_scanned = len(files)
         if not files:

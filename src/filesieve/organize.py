@@ -11,7 +11,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -92,7 +92,14 @@ class OrganizerState:
                 last_status=excluded.last_status,
                 updated_at=excluded.updated_at
             """,
-            (source_path, source_sha256, destination_path, destination_sha256, status, datetime.utcnow().isoformat()),
+            (
+                source_path,
+                source_sha256,
+                destination_path,
+                destination_sha256,
+                status,
+                datetime.now(timezone.utc).isoformat(),
+            ),
         )
         self.conn.commit()
 
@@ -223,6 +230,15 @@ def _versioned_destination(path: str) -> str:
         idx += 1
 
 
+def _path_is_within(path: str, root: str) -> bool:
+    path_abs = os.path.normcase(os.path.realpath(path))
+    root_abs = os.path.normcase(os.path.realpath(root))
+    try:
+        return os.path.commonpath((path_abs, root_abs)) == root_abs
+    except ValueError:
+        return False
+
+
 class MediaOrganizer:
     def __init__(
         self,
@@ -237,12 +253,13 @@ class MediaOrganizer:
         self.target_root = os.path.abspath(target_root)
         self.config = config
         self.dry_run = config.dry_run if dry_run is None else dry_run
-        self.state = OrganizerState(state_db)
+        self.state = None if self.dry_run else OrganizerState(state_db)
         self.pause_event = threading.Event()
         self.stop_requested = False
 
     def close(self) -> None:
-        self.state.close()
+        if self.state is not None:
+            self.state.close()
 
     def pause(self) -> None:
         self.pause_event.set()
@@ -256,7 +273,14 @@ class MediaOrganizer:
     def _iter_media_files(self) -> list[str]:
         files: list[str] = []
         for source in self.sources:
-            for root, _, names in os.walk(source):
+            if _path_is_within(source, self.target_root):
+                continue
+            for root, dirs, names in os.walk(source):
+                dirs[:] = [
+                    name
+                    for name in dirs
+                    if not _path_is_within(os.path.join(root, name), self.target_root)
+                ]
                 for name in sorted(names):
                     path = os.path.join(root, name)
                     if Path(path).suffix.lower() in VIDEO_EXTENSIONS:
@@ -274,7 +298,8 @@ class MediaOrganizer:
             groups.setdefault(rec.dedupe_key, []).append(rec)
 
         duplicates_dir = os.path.join(self.target_root, self.config.duplicates_dir_name)
-        os.makedirs(duplicates_dir, exist_ok=True)
+        if not self.dry_run:
+            os.makedirs(duplicates_dir, exist_ok=True)
 
         operations: list[dict[str, str]] = []
         processed = 0
@@ -300,7 +325,7 @@ class MediaOrganizer:
                     status = "duplicate"
 
                 destination = _versioned_destination(destination)
-                state_record = self.state.get(entry.source)
+                state_record = self.state.get(entry.source) if self.state is not None else None
                 if state_record is not None and state_record[0] == source_hash and state_record[1] == destination:
                     if os.path.exists(destination):
                         status = "already-current"
@@ -327,7 +352,14 @@ class MediaOrganizer:
                     destination_hash = _sha256(destination)
                 else:
                     destination_hash = source_hash
-                self.state.upsert(entry.source, source_hash, destination, destination_hash, status)
+                if self.state is not None:
+                    self.state.upsert(
+                        entry.source,
+                        source_hash,
+                        destination,
+                        destination_hash,
+                        status,
+                    )
 
                 if progress is not None:
                     progress(

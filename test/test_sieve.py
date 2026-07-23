@@ -73,6 +73,26 @@ def test_walk_many_dedupes_across_roots(tmp_path):
     assert moved["source"] == str(right.resolve())
 
 
+@pytest.mark.parametrize("overlap", ["same-root", "parent-child"])
+def test_walk_many_does_not_treat_overlapping_roots_as_duplicates(tmp_path, overlap):
+    root = tmp_path / "root"
+    nested = root / "nested"
+    dup = tmp_path / "dups"
+    nested.mkdir(parents=True)
+    dup.mkdir()
+
+    only_file = nested / "only.bin"
+    only_file.write_bytes(b"unique-content")
+
+    base_dirs = [str(root), str(root)] if overlap == "same-root" else [str(root), str(nested)]
+    engine = sieve.Sieve(mode="exact", dup_dir=str(dup), no_cache=True, hash_workers=1)
+    engine.walk_many(base_dirs)
+
+    assert engine.dup_count == 0
+    assert only_file.exists()
+    assert list(dup.rglob("only.bin")) == []
+
+
 def test_repeated_run_uses_cache_hits(tmp_path):
     src = tmp_path / "src"
     dup = tmp_path / "dups"
