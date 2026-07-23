@@ -14,6 +14,10 @@ All notable user-visible changes to FileSieve are documented here.
   database, and default-config creation until an apply operation requires them.
 - Compare perceptual hashes across exact prefix boundaries while retaining
   bounded candidate indexing.
+- Compare image perceptual hashes across source resolutions so scaled copies can
+  appear in the same similarity cluster.
+- Reject similarity-report requests in exact-only mode with an actionable
+  command-line error instead of writing an empty report.
 
 ### Added
 

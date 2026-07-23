@@ -76,6 +76,9 @@ Media mode with report output:
 filesieve --mode media --report-similar ./similar.json --alternate /tmp/sieve/dups ~/Photos ~/Videos
 ```
 
+`--report-similar` requires `--mode media`; exact mode only considers
+byte-identical files.
+
 Run through `uv`:
 
 ```bash
