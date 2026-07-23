@@ -61,6 +61,8 @@ filesieve [OPTIONS] BASE_DIR [BASE_DIR ...]
 - `--ffmpeg PATH`: explicit `ffmpeg` path or executable name.
 - `--ffprobe PATH`: explicit `ffprobe` path or executable name.
 - `--report-similar PATH`: write perceptual media clusters JSON.
+- `--move-similar`: move perceptual duplicates to the alternate directory,
+  keeping the highest-resolution file.
 
 ### Examples
 
@@ -78,6 +80,18 @@ filesieve --mode media --report-similar ./similar.json --alternate /tmp/sieve/du
 
 `--report-similar` requires `--mode media`; exact mode only considers
 byte-identical files.
+
+Move lower-resolution perceptual duplicates after reviewing a report:
+
+```bash
+filesieve --mode media --move-similar --report-similar ./similar.json \
+  --alternate /tmp/sieve/dups ~/Photos
+```
+
+Perceptual moves are opt-in because similarity matching can produce false
+positives. Within each cluster, FileSieve keeps the file with the greatest pixel
+area. Resolution ties prefer the larger file, then the oldest modification
+time, then the lexicographically first path.
 
 Run through `uv`:
 
@@ -160,7 +174,7 @@ duration_bucket_seconds:2
 ## Safety model
 
 - File moves happen only for exact duplicates after byte-for-byte verification.
-- Perceptual matches are advisory in `similar_media_candidates` output only.
+- Perceptual matches are advisory unless `--move-similar` is explicitly used.
 - If FFmpeg tools are unavailable, perceptual stage is skipped automatically.
 
 ## Additional documentation

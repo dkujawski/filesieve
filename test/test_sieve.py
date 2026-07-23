@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from filesieve import sieve
+from filesieve import media, sieve
 
 
 def test_walk_moves_newer_exact_duplicate_and_records_kept(tmp_path):
@@ -185,6 +185,109 @@ def test_media_mode_logs_fallback_when_tools_missing(tmp_path, caplog):
     assert any("skipping perceptual media stage" in rec.message for rec in caplog.records)
 
 
+def _fake_scaled_media_result(small_path, large_path):
+    return media.MediaPipelineResult(
+        similar_media_candidates=[
+            {
+                "cluster_id": "media-1",
+                "paths": [str(small_path), str(large_path)],
+                "score_summary": {
+                    "kind": media.IMAGE_KIND,
+                    "pairs": 1,
+                    "min": 0,
+                    "max": 0,
+                },
+            }
+        ],
+        media_metadata={
+            str(small_path): {"width": 512, "height": 512, "duration": 0.0},
+            str(large_path): {"width": 1024, "height": 1024, "duration": 0.0},
+        },
+        cache_hits=0,
+        cache_misses=0,
+        tools_available=True,
+    )
+
+
+def test_similar_media_remains_report_only_by_default(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    duplicate_dir = tmp_path / "duplicates"
+    source.mkdir()
+    small = source / "small.png"
+    large = source / "large.png"
+    small.write_bytes(b"small-file")
+    large.write_bytes(b"large-file")
+
+    monkeypatch.setattr(
+        sieve,
+        "run_media_pipeline",
+        lambda *args, **kwargs: _fake_scaled_media_result(small, large),
+    )
+
+    engine = sieve.Sieve(
+        mode="media",
+        dup_dir=str(duplicate_dir),
+        no_cache=True,
+        hash_workers=1,
+        media_workers=1,
+    )
+    engine.walk(str(source))
+
+    assert engine.dup_count == 0
+    assert small.exists()
+    assert large.exists()
+
+
+def test_move_similar_keeps_highest_resolution(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    duplicate_dir = tmp_path / "duplicates"
+    source.mkdir()
+    small = source / "small.png"
+    large = source / "large.png"
+    small.write_bytes(b"s" * 200)
+    large.write_bytes(b"l" * 100)
+    os.utime(small, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(large, ns=(2_000_000_000, 2_000_000_000))
+
+    monkeypatch.setattr(
+        sieve,
+        "run_media_pipeline",
+        lambda *args, **kwargs: _fake_scaled_media_result(small, large),
+    )
+
+    engine = sieve.Sieve(
+        mode="media",
+        move_similar=True,
+        dup_dir=str(duplicate_dir),
+        no_cache=True,
+        hash_workers=1,
+        media_workers=1,
+    )
+    engine.walk(str(source))
+
+    assert engine.dup_count == 1
+    assert large.exists()
+    assert not small.exists()
+    moved = engine.results["duplicates_moved"][0]
+    assert moved["source"] == str(small)
+    assert moved["kept"] == str(large)
+    assert moved["reason"] == "perceptual-similar"
+    assert os.path.exists(moved["destination"])
+
+    cluster = engine.results["similar_media_candidates"][0]
+    assert cluster["kept"] == str(large)
+    assert cluster["moved"] == [moved]
+
+
 def test_sieve_rejects_invalid_mode(tmp_path):
     with pytest.raises(ValueError, match="Invalid mode"):
         sieve.Sieve(mode="invalid-mode", dup_dir=str(tmp_path / "dups"))
+
+
+def test_sieve_rejects_move_similar_in_exact_mode(tmp_path):
+    with pytest.raises(ValueError, match="--move-similar requires --mode media"):
+        sieve.Sieve(
+            mode="exact",
+            move_similar=True,
+            dup_dir=str(tmp_path / "dups"),
+        )
