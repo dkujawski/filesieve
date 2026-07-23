@@ -265,12 +265,10 @@ def _signature_block_keys(
     duration_bucket_seconds: int,
 ) -> list[tuple[object, ...]]:
     kind = str(signature["kind"])
-    width = int(meta.get("width", 0))
-    height = int(meta.get("height", 0))
     if kind == IMAGE_KIND:
         digest = int(signature["hash"])
         return [
-            (kind, width // 64, height // 64, *key)
+            (kind, *key)
             for key in _partitioned_hamming_keys(
                 digest,
                 bit_width=64,
@@ -281,6 +279,8 @@ def _signature_block_keys(
     hashes = [int(value) for value in signature.get("hashes", [])]
     if not hashes:
         return []
+    width = int(meta.get("width", 0))
+    height = int(meta.get("height", 0))
     duration = float(meta.get("duration", 0.0))
     duration_bucket = (
         int(duration // duration_bucket_seconds)
