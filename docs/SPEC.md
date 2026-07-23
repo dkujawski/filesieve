@@ -1,5 +1,11 @@
 # FileSieve specification
 
+## CLI terminal safety
+
+- Media-processing subprocesses must not inherit interactive terminal input.
+- FileSieve commands must leave terminal input and echo behavior unchanged,
+  including when media processing fails or is interrupted.
+
 ## Exact duplicate safety
 
 - Every physical scan path is considered at most once per run, even when input

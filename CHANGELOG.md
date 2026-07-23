@@ -6,6 +6,8 @@ All notable user-visible changes to FileSieve are documented here.
 
 ### Fixed
 
+- Prevent FFmpeg media scans from disabling terminal echo after FileSieve
+  commands finish or are interrupted.
 - Prevent repeated or overlapping scan roots from moving a file as its own
   duplicate.
 - Keep organizer target trees out of source traversal so repeated runs remain

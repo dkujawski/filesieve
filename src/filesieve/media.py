@@ -180,6 +180,7 @@ def _extract_gray_frame(
 ) -> bytes:
     cmd = [
         ffmpeg_bin,
+        "-nostdin",
         "-v",
         "error",
         "-ss",
@@ -200,6 +201,7 @@ def _extract_gray_frame(
         cmd,
         check=False,
         capture_output=True,
+        stdin=subprocess.DEVNULL,
     )
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or b"ffmpeg failed").decode("utf-8", errors="ignore"))
