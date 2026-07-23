@@ -155,12 +155,11 @@ def main() -> int:
             )
         )
         config_path = args.organize_config
-        if config_path is None:
-            default_config = os.path.abspath(organize.DEFAULT_CONFIG_PATH)
-            if not os.path.exists(default_config):
-                organize.write_default_yaml(default_config)
-            config_path = default_config
-        config = organize.load_yaml_config(config_path)
+        config = (
+            organize.load_yaml_config(config_path)
+            if config_path is not None
+            else organize.OrganizerConfig()
+        )
         state_db = os.path.abspath(
             args.organize_state_db
             if args.organize_state_db
