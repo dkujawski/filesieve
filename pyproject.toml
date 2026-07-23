@@ -10,6 +10,13 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
+[dependency-groups]
+dev = [
+    "build>=1.5,<2",
+    "pytest>=9.1.1,<10",
+    "ruff>=0.15.22,<0.16",
+]
+
 [project.scripts]
 filesieve = "filesieve.cmd:main"
 
@@ -23,3 +30,14 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["test"]
 addopts = "-ra"
+markers = [
+    "functional: requires optional system tools or external test data",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "W"]
+ignore = ["E501"]

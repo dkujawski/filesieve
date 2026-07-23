@@ -1,7 +1,5 @@
 import os
 
-import pytest
-
 from filesieve import media
 
 
@@ -101,6 +99,44 @@ def test_image_similarity_threshold_exclusive(tmp_path, monkeypatch):
     assert result.similar_media_candidates == []
 
 
+def test_image_similarity_compares_hashes_across_prefixes(tmp_path, monkeypatch):
+    left = tmp_path / "left.jpg"
+    right = tmp_path / "right.jpg"
+    left.write_bytes(b"left")
+    right.write_bytes(b"right")
+
+    hashes = {
+        str(left): 0,
+        str(right): 1 << 63,
+    }
+
+    monkeypatch.setattr(media, "resolve_media_tools", lambda **kwargs: ("ffmpeg", "ffprobe"))
+
+    def fake_image_signature(path, *, ffmpeg_bin, ffprobe_bin):
+        return (
+            {"kind": media.IMAGE_KIND, "hash": hashes[path]},
+            {"width": 1000, "height": 1000, "duration": 0.0},
+        )
+
+    monkeypatch.setattr(media, "_image_signature", fake_image_signature)
+
+    result = media.run_media_pipeline(
+        [_meta(str(left), media.IMAGE_KIND), _meta(str(right), media.IMAGE_KIND)],
+        moved_paths=set(),
+        media_workers=1,
+        image_hamming_threshold=8,
+        video_hamming_threshold=32,
+        video_frame_hamming_threshold=12,
+        duration_bucket_seconds=2,
+        ffmpeg_path=None,
+        ffprobe_path=None,
+        cache=None,
+        run_id="run-1",
+    )
+
+    assert len(result.similar_media_candidates) == 1
+
+
 def test_video_similarity_total_threshold_boundary(tmp_path, monkeypatch):
     left = tmp_path / "left.mp4"
     right = tmp_path / "right.mp4"
@@ -175,6 +211,46 @@ def test_video_similarity_total_threshold_exclusive(tmp_path, monkeypatch):
     )
 
     assert result.similar_media_candidates == []
+
+
+def test_video_similarity_compares_hashes_across_first_frame_prefixes(
+    tmp_path, monkeypatch
+):
+    left = tmp_path / "left.mp4"
+    right = tmp_path / "right.mp4"
+    left.write_bytes(b"left-video")
+    right.write_bytes(b"right-video")
+
+    signatures = {
+        str(left): [0, 0, 0, 0],
+        str(right): [1 << 63, 0, 0, 0],
+    }
+
+    monkeypatch.setattr(media, "resolve_media_tools", lambda **kwargs: ("ffmpeg", "ffprobe"))
+
+    def fake_video_signature(path, *, ffmpeg_bin, ffprobe_bin):
+        return (
+            {"kind": media.VIDEO_KIND, "hashes": signatures[path]},
+            {"width": 1920, "height": 1080, "duration": 120.0},
+        )
+
+    monkeypatch.setattr(media, "_video_signature", fake_video_signature)
+
+    result = media.run_media_pipeline(
+        [_meta(str(left), media.VIDEO_KIND), _meta(str(right), media.VIDEO_KIND)],
+        moved_paths=set(),
+        media_workers=1,
+        image_hamming_threshold=8,
+        video_hamming_threshold=32,
+        video_frame_hamming_threshold=12,
+        duration_bucket_seconds=2,
+        ffmpeg_path=None,
+        ffprobe_path=None,
+        cache=None,
+        run_id="run-1",
+    )
+
+    assert len(result.similar_media_candidates) == 1
 
 
 def test_media_stage_skips_when_tools_unavailable(tmp_path, monkeypatch, caplog):

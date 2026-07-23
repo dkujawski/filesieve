@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Local functional-test corpus and runtime databases.
+recovered/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

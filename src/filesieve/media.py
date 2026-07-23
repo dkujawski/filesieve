@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass
 import json
 import logging
 import os
 import shutil
 import subprocess
+from collections import defaultdict
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from typing import Callable, Iterable, TypeVar
 
 from filesieve.cache import SignatureCache
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -233,29 +232,73 @@ def _video_signature(path: str, *, ffmpeg_bin: str, ffprobe_bin: str) -> tuple[d
     return signature, meta
 
 
-def _blocking_key(
+def _partitioned_hamming_keys(
+    value: int,
     *,
+    bit_width: int,
+    max_distance: int,
+) -> list[tuple[int, int, int]]:
+    """Return blocks that preserve all matches within ``max_distance``."""
+    if bit_width <= 0:
+        return []
+    if max_distance >= bit_width:
+        return [(0, bit_width, 0)]
+
+    part_count = max_distance + 1
+    base_width, wider_parts = divmod(bit_width, part_count)
+    keys: list[tuple[int, int, int]] = []
+    offset = 0
+    for part_index in range(part_count):
+        part_width = base_width + int(part_index < wider_parts)
+        mask = (1 << part_width) - 1
+        keys.append((part_index, part_width, (value >> offset) & mask))
+        offset += part_width
+    return keys
+
+
+def _signature_block_keys(
     signature: dict[str, object],
     meta: dict[str, object],
+    *,
+    image_hamming_threshold: int,
+    video_hamming_threshold: int,
     duration_bucket_seconds: int,
-) -> tuple[object, ...]:
+) -> list[tuple[object, ...]]:
     kind = str(signature["kind"])
     width = int(meta.get("width", 0))
     height = int(meta.get("height", 0))
-    width_bucket = width // 64
-    height_bucket = height // 64
     if kind == IMAGE_KIND:
         digest = int(signature["hash"])
-        return (kind, width_bucket, height_bucket, digest >> 48)
+        return [
+            (kind, width // 64, height // 64, *key)
+            for key in _partitioned_hamming_keys(
+                digest,
+                bit_width=64,
+                max_distance=image_hamming_threshold,
+            )
+        ]
 
+    hashes = [int(value) for value in signature.get("hashes", [])]
+    if not hashes:
+        return []
     duration = float(meta.get("duration", 0.0))
     duration_bucket = (
-        int(duration // duration_bucket_seconds) if duration_bucket_seconds > 0 else int(duration)
+        int(duration // duration_bucket_seconds)
+        if duration_bucket_seconds > 0
+        else int(duration)
     )
     aspect_ratio_bucket = int(round((width / height) * 10)) if height else 0
-    hashes = [int(value) for value in signature.get("hashes", [])]
-    first_prefix = hashes[0] >> 48 if hashes else 0
-    return (kind, duration_bucket, aspect_ratio_bucket, first_prefix)
+    combined = 0
+    for digest in hashes:
+        combined = (combined << 64) | (digest & ((1 << 64) - 1))
+    return [
+        (kind, duration_bucket, aspect_ratio_bucket, len(hashes), *key)
+        for key in _partitioned_hamming_keys(
+            combined,
+            bit_width=64 * len(hashes),
+            max_distance=video_hamming_threshold,
+        )
+    ]
 
 
 class _UnionFind:
@@ -401,51 +444,58 @@ def run_media_pipeline(
 
     block_groups: dict[tuple[object, ...], list[str]] = defaultdict(list)
     for path, (signature, media_meta) in signatures_by_path.items():
-        key = _blocking_key(
-            signature=signature,
-            meta=media_meta,
+        keys = _signature_block_keys(
+            signature,
+            media_meta,
+            image_hamming_threshold=image_hamming_threshold,
+            video_hamming_threshold=video_hamming_threshold,
             duration_bucket_seconds=duration_bucket_seconds,
         )
-        block_groups[key].append(path)
+        for key in keys:
+            block_groups[key].append(path)
 
     uf = _UnionFind(list(signatures_by_path.keys()))
     score_by_pair: dict[frozenset[str], int] = {}
 
+    candidate_pairs: set[tuple[str, str]] = set()
     for paths in block_groups.values():
         if len(paths) <= 1:
             continue
-        ordered = sorted(paths)
+        ordered = sorted(set(paths))
         for idx, left_path in enumerate(ordered):
-            left_signature, _ = signatures_by_path[left_path]
             for right_path in ordered[idx + 1 :]:
-                right_signature, _ = signatures_by_path[right_path]
-                if left_signature.get("kind") != right_signature.get("kind"):
-                    continue
-                kind = str(left_signature["kind"])
-                similar = False
-                score = 0
-                if kind == IMAGE_KIND:
-                    score = hamming_distance(
-                        int(left_signature["hash"]),
-                        int(right_signature["hash"]),
-                    )
-                    similar = score <= image_hamming_threshold
-                elif kind == VIDEO_KIND:
-                    left_hashes = [int(item) for item in left_signature.get("hashes", [])]
-                    right_hashes = [int(item) for item in right_signature.get("hashes", [])]
-                    if len(left_hashes) != len(right_hashes):
-                        continue
-                    frame_scores = [
-                        hamming_distance(left_hashes[pos], right_hashes[pos])
-                        for pos in range(len(left_hashes))
-                    ]
-                    score = sum(frame_scores)
-                    similar = score <= video_hamming_threshold and all(
-                        value <= video_frame_hamming_threshold for value in frame_scores
-                    )
-                if similar:
-                    uf.union(left_path, right_path)
-                    score_by_pair[frozenset({left_path, right_path})] = score
+                candidate_pairs.add((left_path, right_path))
+
+    for left_path, right_path in sorted(candidate_pairs):
+        left_signature, _ = signatures_by_path[left_path]
+        right_signature, _ = signatures_by_path[right_path]
+        if left_signature.get("kind") != right_signature.get("kind"):
+            continue
+        kind = str(left_signature["kind"])
+        similar = False
+        score = 0
+        if kind == IMAGE_KIND:
+            score = hamming_distance(
+                int(left_signature["hash"]),
+                int(right_signature["hash"]),
+            )
+            similar = score <= image_hamming_threshold
+        elif kind == VIDEO_KIND:
+            left_hashes = [int(item) for item in left_signature.get("hashes", [])]
+            right_hashes = [int(item) for item in right_signature.get("hashes", [])]
+            if len(left_hashes) != len(right_hashes) or not left_hashes:
+                continue
+            frame_scores = [
+                hamming_distance(left_hashes[pos], right_hashes[pos])
+                for pos in range(len(left_hashes))
+            ]
+            score = sum(frame_scores)
+            similar = score <= video_hamming_threshold and all(
+                value <= video_frame_hamming_threshold for value in frame_scores
+            )
+        if similar:
+            uf.union(left_path, right_path)
+            score_by_pair[frozenset({left_path, right_path})] = score
 
     components: dict[str, list[str]] = defaultdict(list)
     for path in signatures_by_path:

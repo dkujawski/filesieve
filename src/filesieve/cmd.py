@@ -9,9 +9,7 @@ import logging
 import os
 import sys
 
-from filesieve import organize
-from filesieve import sieve
-
+from filesieve import organize, sieve
 
 DESCRIPTION = """Recursively walk one or more base directories, moving exact
 duplicate files into an alternate directory while optionally generating
@@ -41,7 +39,7 @@ def is_createable_dir(path_str: str) -> str:
                 "unable to create alternate directory for duplicate files:"
                 f"\n\t{resolved_path}\n{str(exc)}"
             )
-            raise argparse.ArgumentTypeError(msg)
+            raise argparse.ArgumentTypeError(msg) from exc
     return resolved_path
 
 
@@ -157,12 +155,11 @@ def main() -> int:
             )
         )
         config_path = args.organize_config
-        if config_path is None:
-            default_config = os.path.abspath(organize.DEFAULT_CONFIG_PATH)
-            if not os.path.exists(default_config):
-                organize.write_default_yaml(default_config)
-            config_path = default_config
-        config = organize.load_yaml_config(config_path)
+        config = (
+            organize.load_yaml_config(config_path)
+            if config_path is not None
+            else organize.OrganizerConfig()
+        )
         state_db = os.path.abspath(
             args.organize_state_db
             if args.organize_state_db

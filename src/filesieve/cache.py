@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
 import sqlite3
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)

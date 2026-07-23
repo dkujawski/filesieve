@@ -103,3 +103,64 @@ def test_organizer_apply_is_idempotent(tmp_path):
     assert organized_file.exists()
     assert not movie.exists()
     assert os.path.exists(state_db)
+
+
+def test_organizer_ignores_nested_target_on_repeated_apply(tmp_path):
+    source = tmp_path / "source"
+    target = source / "organized"
+    source.mkdir()
+
+    movie = source / "Movie.Title.(2021).1080p.mkv"
+    movie.write_bytes(b"movie")
+    state_db = target / ".filesieve-organizer.sqlite"
+    config = OrganizerConfig(dry_run=False)
+
+    first = MediaOrganizer(
+        sources=[str(source)],
+        target_root=str(target),
+        config=config,
+        state_db=str(state_db),
+        dry_run=False,
+    )
+    first_result = first.run()
+    first.close()
+
+    second = MediaOrganizer(
+        sources=[str(source)],
+        target_root=str(target),
+        config=config,
+        state_db=str(state_db),
+        dry_run=False,
+    )
+    second_result = second.run()
+    second.close()
+
+    organized_file = target / "Movies" / "Movie Title (2021)" / "Movie Title (2021).mkv"
+    assert first_result["moved"] == 1
+    assert second_result["total"] == 0
+    assert second_result["moved"] == 0
+    assert organized_file.exists()
+    assert not organized_file.with_name("Movie Title (2021) (2).mkv").exists()
+
+
+def test_organizer_dry_run_does_not_create_target_or_state(tmp_path):
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    state_db = tmp_path / "state" / "organizer.sqlite"
+    source.mkdir()
+    (source / "Movie.Title.(2021).1080p.mkv").write_bytes(b"movie")
+
+    runner = MediaOrganizer(
+        sources=[str(source)],
+        target_root=str(target),
+        config=OrganizerConfig(dry_run=True),
+        state_db=str(state_db),
+        dry_run=True,
+    )
+    result = runner.run()
+    runner.close()
+
+    assert result["moved"] == 0
+    assert result["operations"]
+    assert not target.exists()
+    assert not state_db.exists()
