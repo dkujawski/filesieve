@@ -1,5 +1,7 @@
 # filesieve
 
+[![CI](https://github.com/dkujawski/filesieve/actions/workflows/ci.yml/badge.svg)](https://github.com/dkujawski/filesieve/actions/workflows/ci.yml)
+
 `filesieve` is a command-line utility for finding exact duplicate files and
 moving duplicate copies into an alternate directory while leaving one canonical
 original in place.
