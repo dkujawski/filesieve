@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-a",
         "--alternate",
         type=is_createable_dir,
-        help="move exact duplicate files into this directory",
+        help="move exact and opted-in perceptual duplicate files into this directory",
     )
     parser.add_argument(
         "--mode",
@@ -101,7 +101,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--report-similar",
-        help="write perceptual media similarity clusters to this JSON file",
+        help="write perceptual media similarity clusters to this JSON file (requires media mode)",
+    )
+    parser.add_argument(
+        "--move-similar",
+        action="store_true",
+        help="move perceptual duplicates while keeping the highest resolution (requires media mode)",
     )
     parser.add_argument(
         "--organize-media",
@@ -214,9 +219,13 @@ def main() -> int:
             media_workers=args.media_workers,
             ffmpeg_path=args.ffmpeg,
             ffprobe_path=args.ffprobe,
+            move_similar=args.move_similar,
         )
     except ValueError as exc:
         parser.error(str(exc))
+
+    if args.report_similar and engine.mode != "media":
+        parser.error("--report-similar requires --mode media")
 
     LOGGER.info("Processing %d base path(s)", len(args.base))
     engine.walk_many(args.base)

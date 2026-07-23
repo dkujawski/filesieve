@@ -25,6 +25,16 @@
   `threshold + 1` segments. By the pigeonhole principle, hashes within the
   configured threshold share at least one segment and reach the final distance
   comparison even when their former 16-bit prefixes differ.
-- Existing image dimension and video duration/aspect blocking remain in place.
+- Image candidate indexing is independent of source dimensions so resized
+  copies can be compared. Video duration/aspect blocking remains in place.
+- `--report-similar` requires media mode. Exact-only mode fails with an
+  actionable error rather than producing a misleading empty report.
+- Perceptual matches remain report-only unless `--move-similar` is explicitly
+  supplied in media mode.
+- When moving a similarity cluster, FileSieve keeps the greatest pixel-area
+  member. Ties prefer greater file size, oldest `mtime_ns`, then
+  lexicographically first path.
+- Each moved perceptual duplicate records its source, destination, retained
+  canonical path, and `perceptual-similar` reason in results and reports.
 - Recovered-image functional tests are opt-in and require FFmpeg, FFprobe, and
   `FILESIEVE_RECOVERED_DIR`.

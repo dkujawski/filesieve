@@ -137,6 +137,45 @@ def test_image_similarity_compares_hashes_across_prefixes(tmp_path, monkeypatch)
     assert len(result.similar_media_candidates) == 1
 
 
+def test_image_similarity_compares_hashes_across_resolutions(tmp_path, monkeypatch):
+    small = tmp_path / "small.jpg"
+    large = tmp_path / "large.jpg"
+    small.write_bytes(b"small")
+    large.write_bytes(b"large")
+
+    dimensions = {
+        str(small): (512, 512),
+        str(large): (1024, 1024),
+    }
+
+    monkeypatch.setattr(media, "resolve_media_tools", lambda **kwargs: ("ffmpeg", "ffprobe"))
+
+    def fake_image_signature(path, *, ffmpeg_bin, ffprobe_bin):
+        width, height = dimensions[path]
+        return (
+            {"kind": media.IMAGE_KIND, "hash": 0x1234},
+            {"width": width, "height": height, "duration": 0.0},
+        )
+
+    monkeypatch.setattr(media, "_image_signature", fake_image_signature)
+
+    result = media.run_media_pipeline(
+        [_meta(str(small), media.IMAGE_KIND), _meta(str(large), media.IMAGE_KIND)],
+        moved_paths=set(),
+        media_workers=1,
+        image_hamming_threshold=8,
+        video_hamming_threshold=32,
+        video_frame_hamming_threshold=12,
+        duration_bucket_seconds=2,
+        ffmpeg_path=None,
+        ffprobe_path=None,
+        cache=None,
+        run_id="run-1",
+    )
+
+    assert len(result.similar_media_candidates) == 1
+
+
 def test_video_similarity_total_threshold_boundary(tmp_path, monkeypatch):
     left = tmp_path / "left.mp4"
     right = tmp_path / "right.mp4"
