@@ -1,4 +1,6 @@
 import os
+import subprocess
+from types import SimpleNamespace
 
 from filesieve import media
 
@@ -13,6 +15,26 @@ def _meta(path: str, kind: str) -> media.MediaFileMeta:
         ino=stat.st_ino,
         kind=kind,
     )
+
+
+def test_ffmpeg_frame_extraction_does_not_inherit_terminal_input(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=bytes(media.FRAME_PIXELS),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(media.subprocess, "run", fake_run)
+
+    media._extract_gray_frame("image.jpg", ffmpeg_bin="ffmpeg", timestamp=0.0)
+
+    command, kwargs = calls[0]
+    assert command[:2] == ["ffmpeg", "-nostdin"]
+    assert kwargs["stdin"] is subprocess.DEVNULL
 
 
 def test_dhash_is_deterministic():
